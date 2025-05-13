@@ -22,84 +22,59 @@ namespace ShareVault.API.Controllers
             _tokenService = tokenService;
         }
 
-        // POST: api/auth/register
         [HttpPost("register")]
-        public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+        public async Task<IActionResult> Register(RegisterDto request)
         {
-            if (await _context.Users.AnyAsync(u => u.Email == request.Email))
-                return BadRequest("Bu e-posta zaten kayıtlı.");
+            if (await _context.Users.AnyAsync(x => x.Email == request.Email))
+                return BadRequest("Email zaten kayıtlı.");
 
-            // Şifre hash'leme
-            using var sha256 = SHA256.Create();
-            var passwordBytes = Encoding.UTF8.GetBytes(request.Password);
-            var hashedPasswordBytes = sha256.ComputeHash(passwordBytes);
+            using var hmac = new HMACSHA512();
 
             var user = new User
             {
-                Username = request.Username,
+                FullName = request.FullName,
                 Email = request.Email,
-                PasswordHash = hashedPasswordBytes // Doğrudan byte[] olarak atanıyor
+                PasswordHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(request.Password)),
+                PasswordSalt = hmac.Key,
+                Role = "Editor"
             };
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            // Burada rol işlemlerini veritabanınıza göre ayrıca yapmanız gerekir
-
             var token = _tokenService.CreateToken(user);
-            var response = new AuthResponse
-            {
-                Token = token,
-                Username = user.Username
-            };
 
-            return Ok(response);
+            return Ok(new
+            {
+                token,
+                user.Email,
+                user.FullName
+            });
         }
 
-        // POST: api/auth/login
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        public async Task<IActionResult> Login(LoginDto request)
         {
-            // Kullanıcı adı veya e-posta ile kullanıcıyı bul
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u =>
-                    u.Username == request.Username ||
-                    u.Email == request.Username);
+            var user = await _context.Users.FirstOrDefaultAsync(x => x.Email == request.Email);
+            if (user == null) return Unauthorized("Kullanıcı bulunamadı.");
 
-            if (user == null)
-                return Unauthorized("Kullanıcı bulunamadı.");
+            using var hmac = new HMACSHA512(user.PasswordSalt);
+            var computedHash = hmac.ComputeHash(Encoding.UTF8.GetBytes(request.Password));
 
-            // Şifre doğrulama
-            using var sha256 = SHA256.Create();
-            var computedHash = sha256.ComputeHash(Encoding.UTF8.GetBytes(request.Password));
-
-            // byte[] dizisinin karşılaştırılması
-            if (!ByteArraysEqual(computedHash, user.PasswordHash))
-                return Unauthorized("Şifre hatalı.");
-
-            var token = _tokenService.CreateToken(user);
-            var response = new AuthResponse
+            for (int i = 0; i < computedHash.Length; i++)
             {
-                Token = token,
-                Username = user.Username
-            };
-
-            return Ok(response);
-        }
-
-        // byte[] dizilerinin karşılaştırılması için yardımcı metod
-        private bool ByteArraysEqual(byte[] a1, byte[] a2)
-        {
-            if (a1.Length != a2.Length)
-                return false;
-
-            for (int i = 0; i < a1.Length; i++)
-            {
-                if (a1[i] != a2[i])
-                    return false;
+                if (computedHash[i] != user.PasswordHash[i])
+                    return Unauthorized("Şifre hatalı.");
             }
 
-            return true;
+            var token = _tokenService.CreateToken(user);
+
+            return Ok(new
+            {
+                token,
+                user.Email,
+                user.FullName
+            });
         }
     }
 }
