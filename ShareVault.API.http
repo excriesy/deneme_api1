@@ -1,0 +1,6 @@
+@ShareVault.API_HostAddress = http://localhost:5112
+
+GET {{ShareVault.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
