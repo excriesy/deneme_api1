@@ -8,5 +8,7 @@
         public byte[] PasswordHash { get; set; } = Array.Empty<byte>();
         public byte[] PasswordSalt { get; set; } = Array.Empty<byte>();
         public string Role { get; set; } = "Editor";
+        public ICollection<UserRole> UserRoles { get; set; }
+
     }
 }
