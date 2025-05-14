@@ -24,15 +24,17 @@ namespace ShareVault.API.Services
             };
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
-                _configuration.GetSection("AppSettings:Token").Value ?? "DefaultSecretKeyForTesting12345678901234567890"));
+                _configuration.GetSection("Jwt:Key").Value ?? "DefaultSecretKeyForTesting1234567890123456789012345678901234567890"));
 
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha512Signature);
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(claims),
                 Expires = DateTime.Now.AddDays(1),
-                SigningCredentials = creds
+                SigningCredentials = creds,
+                Issuer = _configuration.GetSection("Jwt:Issuer").Value,
+                Audience = _configuration.GetSection("Jwt:Audience").Value
             };
 
             var tokenHandler = new JwtSecurityTokenHandler();

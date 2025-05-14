@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace ShareVault.API.Controllers
 {
+    [ApiController]
+    [Route("api/[controller]")]
     public class TestController : Controller
     {
         [HttpGet("secure")]

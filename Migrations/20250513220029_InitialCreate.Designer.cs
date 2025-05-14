@@ -11,7 +11,7 @@ using ShareVault.API.Data;
 namespace ShareVault.API.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20250513150259_InitialCreate")]
+    [Migration("20250513220029_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -53,11 +53,20 @@ namespace ShareVault.API.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("PasswordHash")
+                    b.Property<string>("FullName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("FullName");
 
-                    b.Property<string>("Username")
+                    b.Property<byte[]>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<byte[]>("PasswordSalt")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("text");
 
