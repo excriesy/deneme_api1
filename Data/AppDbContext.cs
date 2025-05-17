@@ -10,7 +10,10 @@ namespace ShareVault.API.Data
         public DbSet<User> Users => Set<User>();
         public DbSet<Role> Roles => Set<Role>();
         public DbSet<UserRole> UserRoles => Set<UserRole>();
-        // AppDbContext.cs içinde:
+ 
+        public DbSet<FileModel> Files => Set<FileModel>();
+        public DbSet<SharedFile> SharedFiles => Set<SharedFile>();
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -25,16 +28,35 @@ namespace ShareVault.API.Data
                 .WithMany(u => u.UserRoles)
                 .HasForeignKey(ur => ur.UserId);
 
-
             modelBuilder.Entity<User>()
-            .Property(u => u.FullName)
-            .HasColumnName("FullName");
+                .Property(u => u.FullName)
+                .HasColumnName("FullName");
 
             // Role ve UserRole arasındaki ilişki
             modelBuilder.Entity<UserRole>()
                 .HasOne(ur => ur.Role)
                 .WithMany(r => r.UserRoles)
                 .HasForeignKey(ur => ur.RoleId);
+
+            // File ve User arasındaki ilişki
+            modelBuilder.Entity<FileModel>()
+                .HasOne(f => f.User)
+                .WithMany()
+                .HasForeignKey(f => f.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // SharedFile ilişkileri
+            modelBuilder.Entity<SharedFile>()
+                .HasOne(sf => sf.File)
+                .WithMany()
+                .HasForeignKey(sf => sf.FileId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SharedFile>()
+                .HasOne(sf => sf.SharedWithUser)
+                .WithMany()
+                .HasForeignKey(sf => sf.SharedWithUserId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }

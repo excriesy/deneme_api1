@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShareVault Test Arayüzü</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .container { max-width: 800px; margin-top: 2rem; }
+        .card { margin-bottom: 1rem; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">ShareVault Test Arayüzü</h1>
+        
+        <!-- Giriş/Kayıt Formu -->
+        <div id="authSection" class="card">
+            <div class="card-body">
+                <h5 class="card-title">Giriş / Kayıt</h5>
+                <div class="mb-3">
+                    <input type="email" id="email" class="form-control" placeholder="E-posta">
+                </div>
+                <div class="mb-3">
+                    <input type="password" id="password" class="form-control" placeholder="Şifre">
+                </div>
+                <div class="mb-3">
+                    <input type="text" id="fullName" class="form-control" placeholder="Ad Soyad (Kayıt için)">
+                </div>
+                <button onclick="register()" class="btn btn-primary me-2">Kayıt Ol</button>
+                <button onclick="login()" class="btn btn-success">Giriş Yap</button>
+            </div>
+        </div>
+
+        <!-- Dosya İşlemleri -->
+        <div id="fileSection" class="card hidden">
+            <div class="card-body">
+                <h5 class="card-title">Dosya İşlemleri</h5>
+                <div class="mb-3">
+                    <input type="file" id="fileInput" class="form-control">
+                </div>
+                <button onclick="uploadFile()" class="btn btn-primary me-2">Yükle</button>
+                <button onclick="listFiles()" class="btn btn-info me-2">Listele</button>
+                <button onclick="logout()" class="btn btn-danger">Çıkış</button>
+            </div>
+        </div>
+
+        <!-- Dosya Listesi -->
+        <div id="fileList" class="card hidden">
+            <div class="card-body">
+                <h5 class="card-title">Dosyalarım</h5>
+                <div id="filesList" class="list-group"></div>
+            </div>
+        </div>
+
+        <!-- Paylaşım Formu -->
+        <div id="shareSection" class="card hidden">
+            <div class="card-body">
+                <h5 class="card-title">Dosya Paylaş</h5>
+                <div class="mb-3">
+                    <label class="form-label">Paylaşılacak Kullanıcı ID'leri (virgülle ayırın)</label>
+                    <input type="text" id="shareUserIds" class="form-control" placeholder="Örnek: 1,2,3">
+                </div>
+                <button onclick="shareFile()" class="btn btn-primary">Paylaş</button>
+            </div>
+        </div>
+
+        <!-- Admin Paneli -->
+        <div id="adminSection" class="card hidden">
+            <div class="card-body">
+                <h5 class="card-title">Admin Paneli</h5>
+                <button onclick="showShareHistory()" class="btn btn-primary">Paylaşım Geçmişi</button>
+            </div>
+        </div>
+
+        <!-- Paylaşım Geçmişi -->
+        <div id="shareHistorySection" class="card hidden">
+            <div class="card-body">
+                <h5 class="card-title">Paylaşım Geçmişi</h5>
+                <div id="shareHistoryList" class="list-group"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let token = '';
+        let selectedFileId = null;
+
+        // API URL'sini buraya yazın
+        const API_URL = 'https://localhost:7001/api';
+
+        async function register() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const fullName = document.getElementById('fullName').value;
+
+            try {
+                const response = await fetch(`${API_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, fullName })
+                });
+
+                if (response.ok) {
+                    alert('Kayıt başarılı! Giriş yapabilirsiniz.');
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    token = data.token;
+                    document.getElementById('authSection').classList.add('hidden');
+                    document.getElementById('fileSection').classList.remove('hidden');
+                    document.getElementById('fileList').classList.remove('hidden');
+                    
+                    // Admin kontrolü
+                    const tokenData = JSON.parse(atob(token.split('.')[1]));
+                    if (tokenData.role === 'Admin') {
+                        document.getElementById('adminSection').classList.remove('hidden');
+                    }
+                    
+                    listFiles();
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Lütfen bir dosya seçin');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_URL}/file/upload`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+
+                if (response.ok) {
+                    alert('Dosya başarıyla yüklendi');
+                    listFiles();
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        async function listFiles() {
+            try {
+                const response = await fetch(`${API_URL}/file/list`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const filesList = document.getElementById('filesList');
+                    filesList.innerHTML = '';
+
+                    data.myFiles.forEach(file => {
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item';
+                        item.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0">${file.fileName}</h6>
+                                    <small>Boyut: ${(file.fileSize / 1024).toFixed(2)} KB</small>
+                                </div>
+                                <div>
+                                    <button onclick="downloadFile(${file.id})" class="btn btn-sm btn-success me-2">İndir</button>
+                                    <button onclick="showShareSection(${file.id})" class="btn btn-sm btn-primary me-2">Paylaş</button>
+                                    <button onclick="showSharedUsers(${file.id})" class="btn btn-sm btn-info">Paylaşılanlar</button>
+                                </div>
+                            </div>
+                        `;
+                        filesList.appendChild(item);
+                    });
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        async function downloadFile(fileId) {
+            try {
+                const response = await fetch(`${API_URL}/file/download/${fileId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'downloaded-file';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    a.remove();
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        function showShareSection(fileId) {
+            selectedFileId = fileId;
+            document.getElementById('shareSection').classList.remove('hidden');
+        }
+
+        async function shareFile() {
+            const userIdsInput = document.getElementById('shareUserIds').value;
+            if (!userIdsInput) {
+                alert('Lütfen en az bir kullanıcı ID girin');
+                return;
+            }
+
+            const userIds = userIdsInput.split(',')
+                .map(id => parseInt(id.trim()))
+                .filter(id => !isNaN(id));
+
+            if (userIds.length === 0) {
+                alert('Geçerli kullanıcı ID\'leri girin');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/file/share-multiple`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        fileId: selectedFileId,
+                        userIds: userIds
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    let message = 'Paylaşım sonuçları:\n\n';
+                    result.results.forEach(r => {
+                        message += `Kullanıcı ${r.userId}: ${r.message}\n`;
+                    });
+                    alert(message);
+                    document.getElementById('shareSection').classList.add('hidden');
+                    document.getElementById('shareUserIds').value = '';
+                    showSharedUsers(selectedFileId); // Paylaşım listesini güncelle
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        async function showSharedUsers(fileId) {
+            try {
+                const response = await fetch(`${API_URL}/file/shared-users/${fileId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const sharedUsersList = document.createElement('div');
+                    sharedUsersList.className = 'list-group mt-2';
+                    
+                    data.sharedUsers.forEach(user => {
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item';
+                        item.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0">${user.fullName}</h6>
+                                    <small>Email: ${user.email}</small><br>
+                                    <small>Paylaşım Tarihi: ${new Date(user.sharedDate).toLocaleString()}</small>
+                                </div>
+                                <div>
+                                    <button onclick="updateShareDate(${fileId}, ${user.userId})" class="btn btn-sm btn-warning">Tarihi Güncelle</button>
+                                </div>
+                            </div>
+                        `;
+                        sharedUsersList.appendChild(item);
+                    });
+
+                    // Mevcut paylaşım listesini temizle ve yenisini ekle
+                    const existingList = document.getElementById('sharedUsersList');
+                    if (existingList) {
+                        existingList.remove();
+                    }
+                    sharedUsersList.id = 'sharedUsersList';
+                    document.getElementById('fileList').appendChild(sharedUsersList);
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        async function updateShareDate(fileId, sharedWithUserId) {
+            try {
+                const response = await fetch(`${API_URL}/file/update-share-date`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        fileId: fileId,
+                        sharedWithUserId: sharedWithUserId
+                    })
+                });
+
+                if (response.ok) {
+                    alert('Paylaşım tarihi güncellendi');
+                    showSharedUsers(fileId); // Listeyi yenile
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        async function showShareHistory() {
+            try {
+                const response = await fetch(`${API_URL}/file/admin/share-history`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const historyList = document.getElementById('shareHistoryList');
+                    historyList.innerHTML = '';
+
+                    // Özet bilgileri göster
+                    const summary = document.createElement('div');
+                    summary.className = 'alert alert-info';
+                    summary.innerHTML = `
+                        <strong>Toplam Paylaşım:</strong> ${data.totalShares}<br>
+                        <strong>Aktif Paylaşım:</strong> ${data.activeShares}<br>
+                        <strong>Pasif Paylaşım:</strong> ${data.inactiveShares}
+                    `;
+                    historyList.appendChild(summary);
+
+                    // Paylaşım geçmişini listele
+                    data.shareHistory.forEach(share => {
+                        const item = document.createElement('div');
+                        item.className = `list-group-item ${share.isActive ? '' : 'bg-light'}`;
+                        item.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-0">${share.fileName}</h6>
+                                    <small>Dosya Sahibi: ${share.fileOwner}</small><br>
+                                    <small>Paylaşılan Kullanıcı: ${share.sharedWithUser.fullName} (${share.sharedWithUser.email})</small><br>
+                                    <small>Paylaşım Tarihi: ${new Date(share.sharedDate).toLocaleString()}</small>
+                                </div>
+                                <div>
+                                    <span class="badge ${share.isActive ? 'bg-success' : 'bg-secondary'}">
+                                        ${share.isActive ? 'Aktif' : 'Pasif'}
+                                    </span>
+                                </div>
+                            </div>
+                        `;
+                        historyList.appendChild(item);
+                    });
+
+                    document.getElementById('shareHistorySection').classList.remove('hidden');
+                } else {
+                    const error = await response.text();
+                    alert('Hata: ' + error);
+                }
+            } catch (error) {
+                alert('Hata: ' + error.message);
+            }
+        }
+
+        function logout() {
+            token = '';
+            document.getElementById('authSection').classList.remove('hidden');
+            document.getElementById('fileSection').classList.add('hidden');
+            document.getElementById('fileList').classList.add('hidden');
+            document.getElementById('shareSection').classList.add('hidden');
+            document.getElementById('adminSection').classList.add('hidden');
+            document.getElementById('shareHistorySection').classList.add('hidden');
+        }
+    </script>
+</body>
+</html> 
