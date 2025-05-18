@@ -7,6 +7,7 @@ using ShareVault.API.Models;
 using ShareVault.API.Services;
 using System.Security.Claims;
 using ShareVault.API.Interfaces;
+using AutoMapper;
 
 namespace ShareVault.API.Controllers
 {
@@ -19,23 +20,35 @@ namespace ShareVault.API.Controllers
         private readonly IUserService _userService;
         private readonly ILogService _logService;
         private readonly IBruteForceProtectionService _bruteForceService;
+        private readonly IMapper _mapper;
 
-        public AuthController(AppDbContext context, ITokenService tokenService, IUserService userService, ILogService logService, IBruteForceProtectionService bruteForceService)
+        public AuthController(AppDbContext context, ITokenService tokenService, IUserService userService, ILogService logService, IBruteForceProtectionService bruteForceService, IMapper mapper)
         {
             _context = context;
             _tokenService = tokenService;
             _userService = userService;
             _logService = logService;
             _bruteForceService = bruteForceService;
+            _mapper = mapper;
         }
 
         [HttpPost("register")]
-        public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
+        public async Task<ActionResult<AuthResponse>> Register(RegisterDto registerDto)
         {
             try
             {
                 var user = await _userService.RegisterAsync(registerDto);
-                return Ok(user);
+                var token = await _tokenService.GenerateTokenAsync(user);
+                var refreshToken = _tokenService.GenerateRefreshToken(user);
+
+                await _logService.LogRequestAsync("POST", "/api/auth/register", 200, user.Id);
+
+                return Ok(new AuthResponse
+                {
+                    JwtToken = token,
+                    RefreshToken = refreshToken.Token,
+                    User = _mapper.Map<UserDto>(user)
+                });
             }
             catch (Exception ex)
             {
@@ -44,12 +57,22 @@ namespace ShareVault.API.Controllers
         }
 
         [HttpPost("login")]
-        public async Task<ActionResult<UserDto>> Login(LoginDto loginDto)
+        public async Task<ActionResult<AuthResponse>> Login(LoginDto loginDto)
         {
             try
             {
                 var user = await _userService.LoginAsync(loginDto);
-                return Ok(user);
+                var token = await _tokenService.GenerateTokenAsync(user);
+                var refreshToken = _tokenService.GenerateRefreshToken(user);
+
+                await _logService.LogRequestAsync("POST", "/api/auth/login", 200, user.Id);
+
+                return Ok(new AuthResponse
+                {
+                    JwtToken = token,
+                    RefreshToken = refreshToken.Token,
+                    User = _mapper.Map<UserDto>(user)
+                });
             }
             catch (Exception ex)
             {

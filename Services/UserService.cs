@@ -8,8 +8,8 @@ namespace ShareVault.API.Services
 {
     public interface IUserService
     {
-        Task<UserDto> RegisterAsync(RegisterDto registerDto);
-        Task<UserDto> LoginAsync(LoginDto loginDto);
+        Task<User> RegisterAsync(RegisterDto registerDto);
+        Task<User> LoginAsync(LoginDto loginDto);
         Task<UserDto> GetByIdAsync(string id);
         Task<UserDto> GetByEmailAsync(string email);
         Task<IEnumerable<UserDto>> GetAllAsync();
@@ -35,14 +35,14 @@ namespace ShareVault.API.Services
             _logService = logService;
         }
 
-        public async Task<UserDto> RegisterAsync(RegisterDto registerDto)
+        public async Task<User> RegisterAsync(RegisterDto registerDto)
         {
-            if (await _userRepository.IsEmailUniqueAsync(registerDto.Email))
+            if (!await _userRepository.IsEmailUniqueAsync(registerDto.Email))
             {
                 throw new CustomException("Email already exists", 400);
             }
 
-            if (await _userRepository.IsUsernameUniqueAsync(registerDto.Username))
+            if (!await _userRepository.IsUsernameUniqueAsync(registerDto.Username))
             {
                 throw new CustomException("Username already exists", 400);
             }
@@ -57,10 +57,10 @@ namespace ShareVault.API.Services
 
             await _logService.LogSecurityAsync("User registered", user.Id);
 
-            return _mapper.Map<UserDto>(user);
+            return user;
         }
 
-        public async Task<UserDto> LoginAsync(LoginDto loginDto)
+        public async Task<User> LoginAsync(LoginDto loginDto)
         {
             var user = await _userRepository.GetByEmailAsync(loginDto.Email);
             if (user == null)
@@ -81,7 +81,7 @@ namespace ShareVault.API.Services
 
             await _logService.LogSecurityAsync("User logged in", user.Id);
 
-            return _mapper.Map<UserDto>(user);
+            return user;
         }
 
         public async Task<UserDto> GetByIdAsync(string id)

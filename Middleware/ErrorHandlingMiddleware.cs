@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using ShareVault.API.Services;
+using ShareVault.API.Interfaces;
 using System.Net;
 using System.Text.Json;
 
@@ -78,11 +79,11 @@ namespace ShareVault.API.Middleware
             }
 
             // Hatayı logla
-            await _logService.LogError($"HTTP {response.StatusCode} - {context.Request.Method} {context.Request.Path}", ex);
+            await _logService.LogErrorAsync($"HTTP {response.StatusCode} - {context.Request.Method} {context.Request.Path}", ex);
 
             // İsteği logla
             var userId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            await _logService.LogRequest(context.Request.Method, context.Request.Path, response.StatusCode, userId);
+            await _logService.LogRequestAsync(context.Request.Method, context.Request.Path, response.StatusCode, userId);
 
             var result = JsonSerializer.Serialize(errorResponse);
             await response.WriteAsync(result);

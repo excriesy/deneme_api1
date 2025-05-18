@@ -93,12 +93,13 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-builder.Services.AddScoped<ILogService, LogService>();
+builder.Services.AddSingleton<ILogService, LogService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ICacheService, CacheService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IBruteForceProtectionService, BruteForceProtectionService>();
+builder.Services.AddScoped<IFileService, FileService>();
 builder.Services.AddHttpContextAccessor();
 
 // Repository registrations

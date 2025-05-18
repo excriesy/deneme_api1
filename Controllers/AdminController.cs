@@ -5,6 +5,8 @@ using ShareVault.API.Data;
 using ShareVault.API.Models;
 using ShareVault.API.Services;
 using System.Security.Claims;
+using ShareVault.API.DTOs;
+using ShareVault.API.Interfaces;
 
 namespace ShareVault.API.Controllers
 {
@@ -15,11 +17,13 @@ namespace ShareVault.API.Controllers
     public class AdminController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly IUserService _userService;
         private readonly ILogService _logService;
 
-        public AdminController(AppDbContext context, ILogService logService)
+        public AdminController(AppDbContext context, IUserService userService, ILogService logService)
         {
             _context = context;
+            _userService = userService;
             _logService = logService;
         }
 
@@ -68,7 +72,7 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogError("Paylaşım geçmişi alınırken hata oluştu", ex);
+                await _logService.LogErrorAsync("Paylaşım geçmişi alınırken hata oluştu", ex);
                 return StatusCode(500, "Paylaşım geçmişi alınırken bir hata oluştu");
             }
         }
@@ -134,7 +138,7 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogError("İstatistikler alınırken hata oluştu", ex);
+                await _logService.LogErrorAsync("İstatistikler alınırken hata oluştu", ex);
                 return StatusCode(500, "İstatistikler alınırken bir hata oluştu");
             }
         }
@@ -187,7 +191,7 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogError("Tarih aralığı paylaşım geçmişi alınırken hata oluştu", ex);
+                await _logService.LogErrorAsync("Tarih aralığı paylaşım geçmişi alınırken hata oluştu", ex);
                 return StatusCode(500, "Paylaşım geçmişi alınırken bir hata oluştu");
             }
         }

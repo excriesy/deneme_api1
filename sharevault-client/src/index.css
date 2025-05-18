@@ -11,3 +11,39 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+.layout {
+  min-height: 100vh;
+}
+
+.ant-layout-header {
+  padding: 0 24px;
+}
+
+.ant-menu {
+  line-height: 64px;
+}
+
+.ant-menu-item {
+  margin: 0 !important;
+}
+
+.ant-menu-item a {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.ant-menu-item a:hover {
+  color: #fff;
+}
+
+.ant-menu-item-selected a {
+  color: #fff;
+}
+
+.ant-btn-link {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.ant-btn-link:hover {
+  color: #fff;
+}

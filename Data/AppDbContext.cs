@@ -71,11 +71,11 @@ namespace ShareVault.API.Data
                     .HasForeignKey(e => e.FileId)
                     .OnDelete(DeleteBehavior.Cascade);
                 entity.HasOne(e => e.SharedByUser)
-                    .WithMany()
+                .WithMany()
                     .HasForeignKey(e => e.SharedByUserId)
                     .OnDelete(DeleteBehavior.Restrict);
                 entity.HasOne(e => e.SharedWithUser)
-                    .WithMany()
+                .WithMany()
                     .HasForeignKey(e => e.SharedWithUserId)
                     .OnDelete(DeleteBehavior.Restrict);
             });
@@ -85,9 +85,9 @@ namespace ShareVault.API.Data
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Token).IsRequired();
                 entity.HasOne(e => e.User)
-                    .WithMany()
+                .WithMany()
                     .HasForeignKey(e => e.UserId)
-                    .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<LogEntry>(entity =>

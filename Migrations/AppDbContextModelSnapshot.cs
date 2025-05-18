@@ -22,55 +22,35 @@ namespace ShareVault.API.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("ShareVault.API.Models.ErrorLog", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Environment")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("Exception")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("Message")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("Source")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("StackTrace")
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ErrorLogs");
-                });
-
-            modelBuilder.Entity("ShareVault.API.Models.FileEntity", b =>
+            modelBuilder.Entity("ShareVault.API.Models.FileModel", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("text");
 
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("Path")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<long>("Size")
                         .HasColumnType("bigint");
 
-                    b.Property<DateTime>("UploadDate")
+                    b.Property<DateTime>("UploadedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("UserId")
@@ -79,7 +59,55 @@ namespace ShareVault.API.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("UserId");
+
                     b.ToTable("Files");
+                });
+
+            modelBuilder.Entity("ShareVault.API.Models.LogEntry", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Exception")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestMethod")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestPath")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Source")
+                        .HasColumnType("text");
+
+                    b.Property<string>("StackTrace")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("StatusCode")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Logs");
                 });
 
             modelBuilder.Entity("ShareVault.API.Models.RefreshToken", b =>
@@ -92,6 +120,9 @@ namespace ShareVault.API.Migrations
 
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IpAddress")
+                        .HasColumnType("text");
 
                     b.Property<bool>("IsRevoked")
                         .HasColumnType("boolean");
@@ -106,6 +137,9 @@ namespace ShareVault.API.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("UserAgent")
+                        .HasColumnType("text");
+
                     b.Property<string>("UserId")
                         .IsRequired()
                         .HasColumnType("text");
@@ -117,42 +151,6 @@ namespace ShareVault.API.Migrations
                     b.ToTable("RefreshTokens");
                 });
 
-            modelBuilder.Entity("ShareVault.API.Models.RequestLog", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Environment")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("Method")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
-
-                    b.Property<string>("Path")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int>("StatusCode")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UserId")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("RequestLogs");
-                });
-
             modelBuilder.Entity("ShareVault.API.Models.Role", b =>
                 {
                     b.Property<string>("Id")
@@ -160,56 +158,24 @@ namespace ShareVault.API.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
 
                     b.ToTable("Roles");
-                });
-
-            modelBuilder.Entity("ShareVault.API.Models.SecurityLog", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Details")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("Environment")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("EventType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("IpAddress")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UserAgent")
-                        .HasColumnType("text");
-
-                    b.Property<string>("UserId")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("SecurityLogs");
                 });
 
             modelBuilder.Entity("ShareVault.API.Models.SharedFile", b =>
                 {
                     b.Property<string>("Id")
                         .HasColumnType("text");
+
+                    b.Property<bool>("CanEdit")
+                        .HasColumnType("boolean");
 
                     b.Property<DateTime?>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
@@ -253,7 +219,8 @@ namespace ShareVault.API.Migrations
 
                     b.Property<string>("Email")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
@@ -265,19 +232,18 @@ namespace ShareVault.API.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("PasswordSalt")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasColumnType("text");
-
                     b.Property<string>("Username")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Email")
+                        .IsUnique();
+
+                    b.HasIndex("Username")
+                        .IsUnique();
 
                     b.ToTable("Users");
                 });
@@ -297,6 +263,17 @@ namespace ShareVault.API.Migrations
                     b.ToTable("UserRoles");
                 });
 
+            modelBuilder.Entity("ShareVault.API.Models.FileModel", b =>
+                {
+                    b.HasOne("ShareVault.API.Models.User", "UploadedBy")
+                        .WithMany("Files")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("UploadedBy");
+                });
+
             modelBuilder.Entity("ShareVault.API.Models.RefreshToken", b =>
                 {
                     b.HasOne("ShareVault.API.Models.User", "User")
@@ -310,8 +287,8 @@ namespace ShareVault.API.Migrations
 
             modelBuilder.Entity("ShareVault.API.Models.SharedFile", b =>
                 {
-                    b.HasOne("ShareVault.API.Models.FileEntity", "File")
-                        .WithMany()
+                    b.HasOne("ShareVault.API.Models.FileModel", "File")
+                        .WithMany("SharedFiles")
                         .HasForeignKey("FileId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -319,13 +296,13 @@ namespace ShareVault.API.Migrations
                     b.HasOne("ShareVault.API.Models.User", "SharedByUser")
                         .WithMany()
                         .HasForeignKey("SharedByUserId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("ShareVault.API.Models.User", "SharedWithUser")
                         .WithMany()
                         .HasForeignKey("SharedWithUserId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("File");
@@ -354,6 +331,11 @@ namespace ShareVault.API.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ShareVault.API.Models.FileModel", b =>
+                {
+                    b.Navigation("SharedFiles");
+                });
+
             modelBuilder.Entity("ShareVault.API.Models.Role", b =>
                 {
                     b.Navigation("UserRoles");
@@ -361,6 +343,8 @@ namespace ShareVault.API.Migrations
 
             modelBuilder.Entity("ShareVault.API.Models.User", b =>
                 {
+                    b.Navigation("Files");
+
                     b.Navigation("UserRoles");
                 });
 #pragma warning restore 612, 618

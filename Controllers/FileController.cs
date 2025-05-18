@@ -49,15 +49,15 @@ namespace ShareVault.API.Controllers
         public async Task<IActionResult> UploadFile(IFormFile file)
         {
             try
-            {
-                if (file == null || file.Length == 0)
+        {
+            if (file == null || file.Length == 0)
                     return BadRequest("Dosya seçilmedi");
 
-                if (file.Length > MaxFileSize)
+            if (file.Length > MaxFileSize)
                     return BadRequest($"Dosya boyutu {MaxFileSize / (1024 * 1024)}MB'dan büyük olamaz");
 
-                var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-                if (!AllowedExtensions.Contains(extension))
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!AllowedExtensions.Contains(extension))
                     return BadRequest("Geçersiz dosya türü");
 
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -90,13 +90,13 @@ namespace ShareVault.API.Controllers
         public async Task<IActionResult> DownloadFile(string fileId)
         {
             try
-            {
+        {
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                     return Unauthorized();
-
+            
                 var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId);
-                if (file == null)
+            if (file == null)
                     return NotFound("Dosya bulunamadı");
 
                 var fileBytes = await _fileService.DownloadFileAsync(fileId, userId);
@@ -200,7 +200,7 @@ namespace ShareVault.API.Controllers
                 }
 
                 newShares.Add(new SharedFile
-                {
+            {
                     Id = Guid.NewGuid().ToString(),
                     FileId = request.FileId,
                     SharedByUserId = userId,
@@ -223,7 +223,7 @@ namespace ShareVault.API.Controllers
             if (newShares.Any())
             {
                 await _context.SharedFiles.AddRangeAsync(newShares);
-                await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
             }
 
             return Ok(new
@@ -247,7 +247,7 @@ namespace ShareVault.API.Controllers
         public async Task<IActionResult> DeleteFile(string fileId)
         {
             try
-            {
+        {
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                     return Unauthorized();
