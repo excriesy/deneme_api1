@@ -9,11 +9,13 @@ namespace ShareVault.API.Data
         {
         }
 
-        public DbSet<User> Users => Set<User>();
-        public DbSet<Role> Roles => Set<Role>();
-        public DbSet<UserRole> UserRoles => Set<UserRole>();
-        public DbSet<FileEntity> Files => Set<FileEntity>();
-        public DbSet<SharedFile> SharedFiles => Set<SharedFile>();
+        public DbSet<User> Users { get; set; }
+        public DbSet<Role> Roles { get; set; }
+        public DbSet<UserRole> UserRoles { get; set; }
+        public DbSet<FileModel> Files { get; set; }
+        public DbSet<SharedFile> SharedFiles { get; set; }
+        public DbSet<RefreshToken> RefreshTokens { get; set; }
+        public DbSet<LogEntry> Logs { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -22,27 +24,42 @@ namespace ShareVault.API.Data
             modelBuilder.Entity<User>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.Property(e => e.Username).IsRequired();
-                entity.Property(e => e.Email).IsRequired();
+                entity.Property(e => e.Username).HasMaxLength(50).IsRequired();
+                entity.Property(e => e.Email).HasMaxLength(100).IsRequired();
                 entity.Property(e => e.PasswordHash).IsRequired();
+                entity.HasIndex(e => e.Email).IsUnique();
+                entity.HasIndex(e => e.Username).IsUnique();
             });
 
             modelBuilder.Entity<Role>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.Property(e => e.Name).IsRequired();
+                entity.Property(e => e.Name).HasMaxLength(50).IsRequired();
+                entity.HasIndex(e => e.Name).IsUnique();
             });
 
             modelBuilder.Entity<UserRole>(entity =>
             {
                 entity.HasKey(e => new { e.UserId, e.RoleId });
                 entity.HasOne(e => e.User)
-                    .WithMany(u => u.UserRoles)
+                    .WithMany(e => e.UserRoles)
                     .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
                 entity.HasOne(e => e.Role)
-                    .WithMany(r => r.UserRoles)
+                    .WithMany(e => e.UserRoles)
                     .HasForeignKey(e => e.RoleId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<FileModel>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+                entity.Property(e => e.ContentType).HasMaxLength(100).IsRequired();
+                entity.Property(e => e.Path).IsRequired();
+                entity.HasOne(e => e.UploadedBy)
+                    .WithMany(e => e.Files)
+                    .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
@@ -50,26 +67,35 @@ namespace ShareVault.API.Data
             {
                 entity.HasKey(e => e.Id);
                 entity.HasOne(e => e.File)
-                    .WithMany()
+                    .WithMany(e => e.SharedFiles)
                     .HasForeignKey(e => e.FileId)
                     .OnDelete(DeleteBehavior.Cascade);
                 entity.HasOne(e => e.SharedByUser)
                     .WithMany()
                     .HasForeignKey(e => e.SharedByUserId)
-                    .OnDelete(DeleteBehavior.Cascade);
+                    .OnDelete(DeleteBehavior.Restrict);
                 entity.HasOne(e => e.SharedWithUser)
                     .WithMany()
                     .HasForeignKey(e => e.SharedWithUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<RefreshToken>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Token).IsRequired();
+                entity.HasOne(e => e.User)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
                     .OnDelete(DeleteBehavior.Cascade);
             });
 
-            modelBuilder.Entity<FileEntity>(entity =>
+            modelBuilder.Entity<LogEntry>(entity =>
             {
                 entity.HasKey(e => e.Id);
-                entity.Property(e => e.Name).IsRequired();
-                entity.Property(e => e.Size).IsRequired();
-                entity.Property(e => e.UploadDate).IsRequired();
-                entity.Property(e => e.UserId).IsRequired();
+                entity.Property(e => e.Level).HasMaxLength(50).IsRequired();
+                entity.Property(e => e.Message).IsRequired();
+                entity.Property(e => e.Timestamp).IsRequired();
             });
         }
     }

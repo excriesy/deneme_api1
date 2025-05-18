@@ -1,82 +1,70 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using ShareVault.API.Data;
+using ShareVault.API.Interfaces;
+using ShareVault.API.Models;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 
 namespace ShareVault.API.Services
 {
-    public interface ILogService
-    {
-        Task LogError(string message, Exception ex = null);
-        Task LogWarning(string message);
-        Task LogInfo(string message);
-        Task LogRequest(string method, string path, int statusCode, string message = null);
-    }
-
     public class LogService : ILogService
     {
-        private readonly string _logDirectory;
-        private readonly object _lockObj = new object();
+        private readonly AppDbContext _context;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
-        public LogService(IWebHostEnvironment environment)
+        public LogService(AppDbContext context, IHttpContextAccessor httpContextAccessor)
         {
-            _logDirectory = Path.Combine(environment.ContentRootPath, "Logs");
-            if (!Directory.Exists(_logDirectory))
-            {
-                Directory.CreateDirectory(_logDirectory);
-            }
+            _context = context;
+            _httpContextAccessor = httpContextAccessor;
         }
 
-        private async Task WriteLog(string level, string message, Exception ex = null)
+        public async Task LogSecurityAsync(string message, string? userId)
         {
-            var logMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{level}] {message}";
-            if (ex != null)
+            var logEntry = new LogEntry
             {
-                logMessage += $"\nException: {ex.Message}\nStackTrace: {ex.StackTrace}";
-            }
+                Id = Guid.NewGuid().ToString(),
+                Level = "Security",
+                Message = message,
+                Timestamp = DateTime.UtcNow,
+                UserId = userId
+            };
 
-            var logFile = Path.Combine(_logDirectory, $"log_{DateTime.Now:yyyy-MM-dd}.txt");
-            
-            lock (_lockObj)
-            {
-                File.AppendAllText(logFile, logMessage + Environment.NewLine);
-            }
+            await _context.Logs.AddAsync(logEntry);
+            await _context.SaveChangesAsync();
         }
 
-        public async Task LogError(string message, Exception ex = null)
+        public async Task LogErrorAsync(string message, Exception exception, string? userId)
         {
-            await WriteLog("ERROR", message, ex);
+            var logEntry = new LogEntry
+            {
+                Id = Guid.NewGuid().ToString(),
+                Level = "Error",
+                Message = $"{message}: {exception.Message}",
+                Details = exception.ToString(),
+                Timestamp = DateTime.UtcNow,
+                UserId = userId
+            };
+
+            await _context.Logs.AddAsync(logEntry);
+            await _context.SaveChangesAsync();
         }
 
-        public async Task LogWarning(string message)
+        public async Task LogRequestAsync(string method, string path, int statusCode, string? userId)
         {
-            await WriteLog("WARNING", message);
-        }
+            var logEntry = new LogEntry
+            {
+                Id = Guid.NewGuid().ToString(),
+                Level = "Request",
+                Message = $"{method} {path} - {statusCode}",
+                Timestamp = DateTime.UtcNow,
+                UserId = userId
+            };
 
-        public async Task LogInfo(string message)
-        {
-            await WriteLog("INFO", message);
-        }
-
-        public async Task LogRequest(string method, string path, int statusCode, string message = null)
-        {
-            var logMessage = $"{method} {path} - Status: {statusCode}";
-            if (!string.IsNullOrEmpty(message))
-            {
-                logMessage += $" - {message}";
-            }
-
-            if (statusCode >= 400)
-            {
-                await LogError(logMessage);
-            }
-            else if (statusCode >= 300)
-            {
-                await LogWarning(logMessage);
-            }
-            else
-            {
-                await LogInfo(logMessage);
-            }
+            await _context.Logs.AddAsync(logEntry);
+            await _context.SaveChangesAsync();
         }
     }
 } 

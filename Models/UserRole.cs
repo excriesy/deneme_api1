@@ -1,12 +1,19 @@
-﻿namespace ShareVault.API.Models
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace ShareVault.API.Models
 {
     public class UserRole
     {
-        public int UserId { get; set; }
-        public User User { get; set; }
+        [Key]
+        public required string UserId { get; set; }
+        [Key]
+        public required string RoleId { get; set; }
 
-        public int RoleId { get; set; }
-        public Role Role { get; set; }
+        [ForeignKey("UserId")]
+        public virtual User User { get; set; } = null!;
+
+        [ForeignKey("RoleId")]
+        public virtual Role Role { get; set; } = null!;
     }
-
-}
+} 

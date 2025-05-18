@@ -6,6 +6,7 @@ using ShareVault.API.Models;
 using System.Security.Claims;
 using System.ComponentModel.DataAnnotations;
 using ShareVault.API.Services;
+using ShareVault.API.Interfaces;
 
 namespace ShareVault.API.Controllers
 {
@@ -68,7 +69,8 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogError("Dosya yükleme hatası", ex);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya yükleme hatası", ex, userId);
                 return StatusCode(500, "Dosya yüklenirken bir hata oluştu");
             }
         }
@@ -106,7 +108,8 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogError("Dosya indirme hatası", ex);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya indirme hatası", ex, userId);
                 return StatusCode(500, "Dosya indirilirken bir hata oluştu");
             }
         }
@@ -131,7 +134,8 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogError("Dosya listeleme hatası", ex);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya listeleme hatası", ex, userId);
                 return StatusCode(500, "Dosyalar listelenirken bir hata oluştu");
             }
         }
@@ -197,11 +201,15 @@ namespace ShareVault.API.Controllers
 
                 newShares.Add(new SharedFile
                 {
+                    Id = Guid.NewGuid().ToString(),
                     FileId = request.FileId,
                     SharedByUserId = userId,
                     SharedWithUserId = user.Id,
                     SharedAt = DateTime.UtcNow,
-                    IsActive = true
+                    IsActive = true,
+                    File = file!,
+                    SharedByUser = await _context.Users.FindAsync(userId) ?? throw new InvalidOperationException("Paylaşan kullanıcı bulunamadı"),
+                    SharedWithUser = await _context.Users.FindAsync(user.Id) ?? throw new InvalidOperationException("Paylaşılan kullanıcı bulunamadı")
                 });
 
                 results.Add(new ShareResult
@@ -253,7 +261,8 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogError("Dosya silme hatası", ex);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya silme hatası", ex, userId);
                 return StatusCode(500, "Dosya silinirken bir hata oluştu");
             }
         }
@@ -432,16 +441,16 @@ namespace ShareVault.API.Controllers
     public class ShareMultipleRequest
     {
         [Required]
-        public string FileId { get; set; }
+        public required string FileId { get; set; }
 
         [Required]
-        public List<string> UserIds { get; set; }
+        public required List<string> UserIds { get; set; }
     }
 
     public class ShareResult
     {
-        public string UserId { get; set; }
+        public required string UserId { get; set; }
         public bool Success { get; set; }
-        public string Message { get; set; }
+        public required string Message { get; set; }
     }
 } 

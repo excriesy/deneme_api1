@@ -5,7 +5,7 @@ namespace ShareVault.API.Services
 {
     public interface ICacheService
     {
-        T Get<T>(string key);
+        T? Get<T>(string key);
         void Set<T>(string key, T value, TimeSpan? expiration = null);
         void Remove(string key);
         bool Exists(string key);
@@ -22,9 +22,9 @@ namespace ShareVault.API.Services
             _expirationTimes = new ConcurrentDictionary<string, DateTime>();
         }
 
-        public T Get<T>(string key)
+        public T? Get<T>(string key)
         {
-            if (_cache.TryGetValue(key, out T value))
+            if (_cache.TryGetValue(key, out T? value))
             {
                 if (_expirationTimes.TryGetValue(key, out DateTime expirationTime))
                 {

@@ -1,13 +1,24 @@
 using System;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ShareVault.API.Models
 {
-    public class FileEntity
+    public class FileModel
     {
-        public string Id { get; set; }
-        public string Name { get; set; }
-        public long Size { get; set; }
-        public DateTime UploadDate { get; set; }
-        public string UserId { get; set; }
+        [Key]
+        public required string Id { get; set; }
+        public required string Name { get; set; }
+        public required string ContentType { get; set; }
+        public required long Size { get; set; }
+        public required string Path { get; set; }
+        public required string UserId { get; set; }
+        public DateTime UploadedAt { get; set; }
+        public bool IsPublic { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+
+        [ForeignKey("UserId")]
+        public virtual User? UploadedBy { get; set; }
+        public virtual ICollection<SharedFile> SharedFiles { get; set; } = new List<SharedFile>();
     }
 } 

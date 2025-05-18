@@ -1,56 +1,42 @@
- using System.Diagnostics;
-using ShareVault.API.Services;
+using System;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+using ShareVault.API.Interfaces;
 
 namespace ShareVault.API.Middleware
 {
     public class RequestLoggingMiddleware
     {
         private readonly RequestDelegate _next;
+        private readonly ILogger<RequestLoggingMiddleware> _logger;
         private readonly ILogService _logService;
 
-        public RequestLoggingMiddleware(RequestDelegate next, ILogService logService)
+        public RequestLoggingMiddleware(RequestDelegate next, ILogger<RequestLoggingMiddleware> logger, ILogService logService)
         {
             _next = next;
+            _logger = logger;
             _logService = logService;
         }
 
         public async Task InvokeAsync(HttpContext context)
         {
-            var sw = Stopwatch.StartNew();
-            var originalBodyStream = context.Response.Body;
-
             try
             {
-                using var responseBody = new MemoryStream();
-                context.Response.Body = responseBody;
-
                 await _next(context);
 
-                sw.Stop();
-                var elapsed = sw.ElapsedMilliseconds;
-
-                var statusCode = context.Response.StatusCode;
-                var method = context.Request.Method;
-                var path = context.Request.Path;
-
-                await _logService.LogRequest(
-                    method,
-                    path,
-                    statusCode,
-                    $"Elapsed: {elapsed}ms"
+                var userId = context.User?.FindFirst("sub")?.Value;
+                await _logService.LogRequestAsync(
+                    context.Request.Method,
+                    context.Request.Path,
+                    context.Response.StatusCode,
+                    userId
                 );
-
-                responseBody.Seek(0, SeekOrigin.Begin);
-                await responseBody.CopyToAsync(originalBodyStream);
             }
             catch (Exception ex)
             {
-                await _logService.LogError($"Request failed: {context.Request.Method} {context.Request.Path}", ex);
+                _logger.LogError(ex, "An error occurred while processing the request");
                 throw;
-            }
-            finally
-            {
-                context.Response.Body = originalBodyStream;
             }
         }
     }

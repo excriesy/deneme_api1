@@ -7,6 +7,11 @@ using Microsoft.OpenApi.Models;
 using System.Reflection;
 using ShareVault.API.Services;
 using ShareVault.API.Middleware;
+using ShareVault.API.Interfaces;
+using ShareVault.API.Repositories;
+using ShareVault.API.Mappings;
+using ShareVault.API.Models;
+using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -69,7 +74,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-var key = builder.Configuration["Jwt:Key"];
+var key = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("JWT Key is not configured in appsettings.json");
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -88,10 +93,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<ILogService, LogService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ICacheService, CacheService>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<IBruteForceProtectionService, BruteForceProtectionService>();
+builder.Services.AddHttpContextAccessor();
+
+// Repository registrations
+builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+
+// AutoMapper registration
+builder.Services.AddAutoMapper(typeof(MappingProfile));
+
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 
 builder.Services.AddControllers();
 
@@ -113,11 +130,8 @@ app.UseRouting();
 // CORS middleware'ini ekle
 app.UseCors();
 
-// Global exception middleware'ini ekle
-app.UseMiddleware<GlobalExceptionMiddleware>();
-
-// Request logging middleware'ini ekle
-app.UseMiddleware<RequestLoggingMiddleware>();
+// Global hata yönetimi middleware'ini ekle
+app.UseMiddleware<ErrorHandlingMiddleware>();
 
 app.UseHttpsRedirection();
 
