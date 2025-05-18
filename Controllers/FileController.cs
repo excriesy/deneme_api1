@@ -5,6 +5,7 @@ using ShareVault.API.Data;
 using ShareVault.API.Models;
 using System.Security.Claims;
 using System.ComponentModel.DataAnnotations;
+using ShareVault.API.Services;
 
 namespace ShareVault.API.Controllers
 {
@@ -21,11 +22,15 @@ namespace ShareVault.API.Controllers
         private readonly IWebHostEnvironment _environment;
         private const long MaxFileSize = 100 * 1024 * 1024; // 100MB
         private static readonly string[] AllowedExtensions = { ".pdf", ".doc", ".docx", ".txt", ".jpg", ".jpeg", ".png", ".gif" };
+        private readonly IFileService _fileService;
+        private readonly ILogService _logService;
 
-        public FileController(AppDbContext context, IWebHostEnvironment environment)
+        public FileController(AppDbContext context, IWebHostEnvironment environment, IFileService fileService, ILogService logService)
         {
             _context = context;
             _environment = environment;
+            _fileService = fileService;
+            _logService = logService;
         }
 
         /// <summary>
@@ -40,92 +45,70 @@ namespace ShareVault.API.Controllers
         [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<IActionResult> UploadFile([Required] IFormFile file)
+        public async Task<IActionResult> UploadFile(IFormFile file)
         {
-            if (file == null || file.Length == 0)
-                return BadRequest("Dosya seçilmedi.");
-
-            if (file.Length > MaxFileSize)
-                return BadRequest($"Dosya boyutu {MaxFileSize / (1024 * 1024)}MB'dan büyük olamaz.");
-
-            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-            if (!AllowedExtensions.Contains(extension))
-                return BadRequest("Desteklenmeyen dosya türü.");
-
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-            var uploadsFolder = Path.Combine(_environment.WebRootPath, "uploads");
-            
-            if (!Directory.Exists(uploadsFolder))
-                Directory.CreateDirectory(uploadsFolder);
-
-            var uniqueFileName = $"{Guid.NewGuid()}_{file.FileName}";
-            var filePath = Path.Combine(uploadsFolder, uniqueFileName);
-
-            using (var stream = new FileStream(filePath, FileMode.Create))
+            try
             {
-                await file.CopyToAsync(stream);
+                if (file == null || file.Length == 0)
+                    return BadRequest("Dosya seçilmedi");
+
+                if (file.Length > MaxFileSize)
+                    return BadRequest($"Dosya boyutu {MaxFileSize / (1024 * 1024)}MB'dan büyük olamaz");
+
+                var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+                if (!AllowedExtensions.Contains(extension))
+                    return BadRequest("Geçersiz dosya türü");
+
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var fileId = await _fileService.UploadFileAsync(file, userId);
+                return Ok(new { fileId });
             }
-
-            var fileModel = new FileModel
+            catch (Exception ex)
             {
-                FileName = file.FileName,
-                FilePath = uniqueFileName,
-                FileSize = file.Length,
-                ContentType = file.ContentType,
-                UploadDate = DateTime.UtcNow,
-                UserId = userId
-            };
-
-            _context.Files.Add(fileModel);
-            await _context.SaveChangesAsync();
-
-            return Ok(new { fileModel.Id, fileModel.FileName });
+                await _logService.LogError("Dosya yükleme hatası", ex);
+                return StatusCode(500, "Dosya yüklenirken bir hata oluştu");
+            }
         }
 
         /// <summary>
         /// Belirtilen ID'ye sahip dosyayı indirir.
         /// </summary>
-        /// <param name="id">Dosya ID</param>
+        /// <param name="fileId">Dosya ID</param>
         /// <returns>Dosya içeriği</returns>
         /// <response code="200">Dosya başarıyla indirildi</response>
         /// <response code="404">Dosya bulunamadı</response>
         /// <response code="403">Dosyaya erişim izni yok</response>
-        [HttpGet("download/{id}")]
+        [HttpGet("download/{fileId}")]
         [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        public async Task<IActionResult> DownloadFile([Required] int id)
+        public async Task<IActionResult> DownloadFile(string fileId)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-            
-            var file = await _context.Files
-                .FirstOrDefaultAsync(f => f.Id == id);
-
-            if (file == null)
-                return NotFound("Dosya bulunamadı.");
-
-            if (file.UserId != userId)
+            try
             {
-                var isShared = await _context.SharedFiles
-                    .AnyAsync(sf => sf.FileId == id && sf.SharedWithUserId == userId && sf.IsActive);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
 
-                if (!isShared)
-                    return Forbid();
+                var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId);
+                if (file == null)
+                    return NotFound("Dosya bulunamadı");
+
+                var fileBytes = await _fileService.DownloadFileAsync(fileId, userId);
+                return File(fileBytes, "application/octet-stream", file.Name);
             }
-
-            var filePath = Path.Combine(_environment.WebRootPath, "uploads", file.FilePath);
-            
-            if (!System.IO.File.Exists(filePath))
-                return NotFound("Dosya fiziksel olarak bulunamadı.");
-
-            var memory = new MemoryStream();
-            using (var stream = new FileStream(filePath, FileMode.Open))
+            catch (KeyNotFoundException)
             {
-                await stream.CopyToAsync(memory);
+                return NotFound("Dosya bulunamadı");
             }
-            memory.Position = 0;
-
-            return File(memory, file.ContentType, file.FileName);
+            catch (Exception ex)
+            {
+                await _logService.LogError("Dosya indirme hatası", ex);
+                return StatusCode(500, "Dosya indirilirken bir hata oluştu");
+            }
         }
 
         /// <summary>
@@ -137,46 +120,20 @@ namespace ShareVault.API.Controllers
         [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
         public async Task<IActionResult> ListFiles()
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
-
-            IQueryable<FileModel> filesQuery = _context.Files;
-
-            if (userRole != "Admin")
+            try
             {
-                filesQuery = filesQuery.Where(f => f.UserId == userId);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var files = await _fileService.ListFilesAsync(userId);
+                return Ok(files);
             }
-
-            var files = await filesQuery
-                .Select(f => new
-                {
-                    f.Id,
-                    f.FileName,
-                    f.FileSize,
-                    f.UploadDate,
-                    f.ContentType,
-                    Owner = f.User.FullName
-                })
-                .ToListAsync();
-
-            var sharedFiles = await _context.SharedFiles
-                .Where(sf => sf.SharedWithUserId == userId && sf.IsActive)
-                .Select(sf => new
-                {
-                    sf.File.Id,
-                    sf.File.FileName,
-                    sf.File.FileSize,
-                    sf.File.UploadDate,
-                    sf.File.ContentType,
-                    SharedBy = sf.File.User.FullName
-                })
-                .ToListAsync();
-
-            return Ok(new
+            catch (Exception ex)
             {
-                MyFiles = files,
-                SharedWithMe = sharedFiles
-            });
+                await _logService.LogError("Dosya listeleme hatası", ex);
+                return StatusCode(500, "Dosyalar listelenirken bir hata oluştu");
+            }
         }
 
         /// <summary>
@@ -193,7 +150,9 @@ namespace ShareVault.API.Controllers
         [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> ShareWithMultipleUsers([FromBody] ShareMultipleRequest request)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized();
 
             var file = await _context.Files
                 .FirstOrDefaultAsync(f => f.Id == request.FileId && f.UserId == userId);
@@ -205,12 +164,12 @@ namespace ShareVault.API.Controllers
                 return BadRequest("Kendinizle dosya paylaşamazsınız.");
 
             // Kullanıcı ID'lerinin geçerliliğini kontrol et
-            var validUserIds = await _context.Users
+            var validUsers = await _context.Users
                 .Where(u => request.UserIds.Contains(u.Id))
-                .Select(u => u.Id)
+                .Select(u => new { u.Id, u.Username })
                 .ToListAsync();
 
-            if (!validUserIds.Any())
+            if (!validUsers.Any())
                 return BadRequest("Geçerli kullanıcı bulunamadı.");
 
             var results = new List<ShareResult>();
@@ -219,56 +178,50 @@ namespace ShareVault.API.Controllers
                 .Select(sf => sf.SharedWithUserId)
                 .ToListAsync();
 
-            foreach (var sharedWithUserId in request.UserIds)
+            var newShares = new List<SharedFile>();
+            foreach (var user in validUsers)
             {
-                if (sharedWithUserId == userId)
+                if (user.Id == userId)
                     continue;
 
-                if (!validUserIds.Contains(sharedWithUserId))
+                if (existingShares.Contains(user.Id))
                 {
                     results.Add(new ShareResult
                     {
-                        UserId = sharedWithUserId,
-                        Success = false,
-                        Message = "Kullanıcı bulunamadı"
-                    });
-                    continue;
-                }
-
-                if (existingShares.Contains(sharedWithUserId))
-                {
-                    results.Add(new ShareResult
-                    {
-                        UserId = sharedWithUserId,
+                        UserId = user.Id,
                         Success = false,
                         Message = "Dosya zaten bu kullanıcıyla paylaşılmış"
                     });
                     continue;
                 }
 
-                var sharedFile = new SharedFile
+                newShares.Add(new SharedFile
                 {
                     FileId = request.FileId,
-                    SharedWithUserId = sharedWithUserId,
-                    SharedDate = DateTime.UtcNow,
+                    SharedByUserId = userId,
+                    SharedWithUserId = user.Id,
+                    SharedAt = DateTime.UtcNow,
                     IsActive = true
-                };
+                });
 
-                _context.SharedFiles.Add(sharedFile);
                 results.Add(new ShareResult
                 {
-                    UserId = sharedWithUserId,
+                    UserId = user.Id,
                     Success = true,
                     Message = "Dosya başarıyla paylaşıldı"
                 });
             }
 
-            await _context.SaveChangesAsync();
+            if (newShares.Any())
+            {
+                await _context.SharedFiles.AddRangeAsync(newShares);
+                await _context.SaveChangesAsync();
+            }
 
             return Ok(new
             {
                 FileId = request.FileId,
-                FileName = file.FileName,
+                FileName = file.Name,
                 Results = results
             });
         }
@@ -276,38 +229,33 @@ namespace ShareVault.API.Controllers
         /// <summary>
         /// Bir dosyayı siler.
         /// </summary>
-        /// <param name="id">Silinecek dosya ID</param>
+        /// <param name="fileId">Silinecek dosya ID</param>
         /// <returns>Silme işlemi sonucu</returns>
         /// <response code="200">Dosya başarıyla silindi</response>
         /// <response code="404">Dosya bulunamadı</response>
-        [HttpDelete("{id}")]
+        [HttpDelete("{fileId}")]
         [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> DeleteFile([Required] int id)
+        public async Task<IActionResult> DeleteFile(string fileId)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
 
-            var file = await _context.Files
-                .FirstOrDefaultAsync(f => f.Id == id && (f.UserId == userId || userRole == "Admin"));
-
-            if (file == null)
-                return NotFound("Dosya bulunamadı veya silme yetkiniz yok.");
-
-            var filePath = Path.Combine(_environment.WebRootPath, "uploads", file.FilePath);
-            
-            if (System.IO.File.Exists(filePath))
-                System.IO.File.Delete(filePath);
-
-            var sharedFiles = await _context.SharedFiles
-                .Where(sf => sf.FileId == id)
-                .ToListAsync();
-
-            _context.SharedFiles.RemoveRange(sharedFiles);
-            _context.Files.Remove(file);
-            await _context.SaveChangesAsync();
-
-            return Ok("Dosya başarıyla silindi.");
+                await _fileService.DeleteFileAsync(fileId, userId);
+                return Ok();
+            }
+            catch (KeyNotFoundException)
+            {
+                return NotFound("Dosya bulunamadı");
+            }
+            catch (Exception ex)
+            {
+                await _logService.LogError("Dosya silme hatası", ex);
+                return StatusCode(500, "Dosya silinirken bir hata oluştu");
+            }
         }
 
         /// <summary>
@@ -321,9 +269,11 @@ namespace ShareVault.API.Controllers
         [HttpPost("revoke-access")]
         [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> RevokeAccess([Required] int fileId, [Required] int sharedWithUserId)
+        public async Task<IActionResult> RevokeAccess([Required] string fileId, [Required] string sharedWithUserId)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized();
 
             var file = await _context.Files
                 .FirstOrDefaultAsync(f => f.Id == fileId && f.UserId == userId);
@@ -355,9 +305,9 @@ namespace ShareVault.API.Controllers
         [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        public async Task<IActionResult> GetSharedUsers([Required] int fileId)
+        public async Task<IActionResult> GetSharedUsers([Required] string fileId)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
             var file = await _context.Files
@@ -374,16 +324,16 @@ namespace ShareVault.API.Controllers
                 .Select(sf => new
                 {
                     UserId = sf.SharedWithUserId,
-                    FullName = sf.SharedWithUser.FullName,
+                    Username = sf.SharedWithUser.Username,
                     Email = sf.SharedWithUser.Email,
-                    SharedDate = sf.SharedDate
+                    SharedAt = sf.SharedAt
                 })
                 .ToListAsync();
 
             return Ok(new
             {
                 FileId = fileId,
-                FileName = file.FileName,
+                FileName = file.Name,
                 SharedUsers = sharedUsers
             });
         }
@@ -401,9 +351,9 @@ namespace ShareVault.API.Controllers
         [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        public async Task<IActionResult> UpdateShareDate([Required] int fileId, [Required] int sharedWithUserId)
+        public async Task<IActionResult> UpdateShareDate([Required] string fileId, [Required] string sharedWithUserId)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
             var file = await _context.Files
@@ -412,7 +362,6 @@ namespace ShareVault.API.Controllers
             if (file == null)
                 return NotFound("Dosya bulunamadı.");
 
-            // Dosya sahibi veya Admin olmalı
             if (file.UserId != userId && userRole != "Admin")
                 return Forbid();
 
@@ -422,7 +371,7 @@ namespace ShareVault.API.Controllers
             if (sharedFile == null)
                 return NotFound("Aktif paylaşım bulunamadı.");
 
-            sharedFile.SharedDate = DateTime.UtcNow;
+            sharedFile.SharedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
             return Ok(new
@@ -430,7 +379,7 @@ namespace ShareVault.API.Controllers
                 Message = "Paylaşım tarihi güncellendi",
                 FileId = fileId,
                 SharedWithUserId = sharedWithUserId,
-                NewShareDate = sharedFile.SharedDate
+                NewShareDate = sharedFile.SharedAt
             });
         }
 
@@ -452,20 +401,20 @@ namespace ShareVault.API.Controllers
             var shareHistory = await _context.SharedFiles
                 .Include(sf => sf.File)
                 .Include(sf => sf.SharedWithUser)
-                .Include(sf => sf.File.User)
-                .OrderByDescending(sf => sf.SharedDate)
+                .Include(sf => sf.SharedByUser)
+                .OrderByDescending(sf => sf.SharedAt)
                 .Select(sf => new
                 {
                     FileId = sf.FileId,
-                    FileName = sf.File.FileName,
-                    FileOwner = sf.File.User.FullName,
+                    FileName = sf.File.Name,
+                    FileOwner = sf.SharedByUser.Username,
                     SharedWithUser = new
                     {
                         Id = sf.SharedWithUser.Id,
-                        FullName = sf.SharedWithUser.FullName,
+                        Username = sf.SharedWithUser.Username,
                         Email = sf.SharedWithUser.Email
                     },
-                    SharedDate = sf.SharedDate,
+                    SharedAt = sf.SharedAt,
                     IsActive = sf.IsActive
                 })
                 .ToListAsync();
@@ -483,15 +432,15 @@ namespace ShareVault.API.Controllers
     public class ShareMultipleRequest
     {
         [Required]
-        public int FileId { get; set; }
+        public string FileId { get; set; }
 
         [Required]
-        public List<int> UserIds { get; set; }
+        public List<string> UserIds { get; set; }
     }
 
     public class ShareResult
     {
-        public int UserId { get; set; }
+        public string UserId { get; set; }
         public bool Success { get; set; }
         public string Message { get; set; }
     }

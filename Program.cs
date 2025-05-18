@@ -5,6 +5,8 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.OpenApi.Models;
 using System.Reflection;
+using ShareVault.API.Services;
+using ShareVault.API.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -86,7 +88,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-builder.Services.AddScoped<ShareVault.API.Services.TokenService>();
+builder.Services.AddScoped<TokenService>();
+builder.Services.AddScoped<ILogService, LogService>();
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<ICacheService, CacheService>();
 
 builder.Services.AddControllers();
 
@@ -107,6 +112,12 @@ app.UseRouting();
 
 // CORS middleware'ini ekle
 app.UseCors();
+
+// Global exception middleware'ini ekle
+app.UseMiddleware<GlobalExceptionMiddleware>();
+
+// Request logging middleware'ini ekle
+app.UseMiddleware<RequestLoggingMiddleware>();
 
 app.UseHttpsRedirection();
 

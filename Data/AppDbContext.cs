@@ -5,58 +5,72 @@ namespace ShareVault.API.Data
 {
     public class AppDbContext : DbContext
     {
-        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+        {
+        }
 
         public DbSet<User> Users => Set<User>();
         public DbSet<Role> Roles => Set<Role>();
         public DbSet<UserRole> UserRoles => Set<UserRole>();
- 
-        public DbSet<FileModel> Files => Set<FileModel>();
+        public DbSet<FileEntity> Files => Set<FileEntity>();
         public DbSet<SharedFile> SharedFiles => Set<SharedFile>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // UserRole için bileşik anahtar tanımı
-            modelBuilder.Entity<UserRole>()
-                .HasKey(ur => new { ur.UserId, ur.RoleId });
+            modelBuilder.Entity<User>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Username).IsRequired();
+                entity.Property(e => e.Email).IsRequired();
+                entity.Property(e => e.PasswordHash).IsRequired();
+            });
 
-            // User ve UserRole arasındaki ilişki
-            modelBuilder.Entity<UserRole>()
-                .HasOne(ur => ur.User)
-                .WithMany(u => u.UserRoles)
-                .HasForeignKey(ur => ur.UserId);
+            modelBuilder.Entity<Role>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Name).IsRequired();
+            });
 
-            modelBuilder.Entity<User>()
-                .Property(u => u.FullName)
-                .HasColumnName("FullName");
+            modelBuilder.Entity<UserRole>(entity =>
+            {
+                entity.HasKey(e => new { e.UserId, e.RoleId });
+                entity.HasOne(e => e.User)
+                    .WithMany(u => u.UserRoles)
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.Role)
+                    .WithMany(r => r.UserRoles)
+                    .HasForeignKey(e => e.RoleId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
 
-            // Role ve UserRole arasındaki ilişki
-            modelBuilder.Entity<UserRole>()
-                .HasOne(ur => ur.Role)
-                .WithMany(r => r.UserRoles)
-                .HasForeignKey(ur => ur.RoleId);
+            modelBuilder.Entity<SharedFile>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.HasOne(e => e.File)
+                    .WithMany()
+                    .HasForeignKey(e => e.FileId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.SharedByUser)
+                    .WithMany()
+                    .HasForeignKey(e => e.SharedByUserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.SharedWithUser)
+                    .WithMany()
+                    .HasForeignKey(e => e.SharedWithUserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
 
-            // File ve User arasındaki ilişki
-            modelBuilder.Entity<FileModel>()
-                .HasOne(f => f.User)
-                .WithMany()
-                .HasForeignKey(f => f.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // SharedFile ilişkileri
-            modelBuilder.Entity<SharedFile>()
-                .HasOne(sf => sf.File)
-                .WithMany()
-                .HasForeignKey(sf => sf.FileId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            modelBuilder.Entity<SharedFile>()
-                .HasOne(sf => sf.SharedWithUser)
-                .WithMany()
-                .HasForeignKey(sf => sf.SharedWithUserId)
-                .OnDelete(DeleteBehavior.Cascade);
+            modelBuilder.Entity<FileEntity>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Name).IsRequired();
+                entity.Property(e => e.Size).IsRequired();
+                entity.Property(e => e.UploadDate).IsRequired();
+                entity.Property(e => e.UserId).IsRequired();
+            });
         }
     }
 }

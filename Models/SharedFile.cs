@@ -1,29 +1,19 @@
 using System;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ShareVault.API.Models
 {
     public class SharedFile
     {
-        [Key]
-        public int Id { get; set; }
+        public string Id { get; set; }
+        public string FileId { get; set; }
+        public string SharedByUserId { get; set; }
+        public string SharedWithUserId { get; set; }
+        public DateTime SharedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
+        public bool IsActive { get; set; }
 
-        [Required]
-        public int FileId { get; set; }
-
-        [ForeignKey("FileId")]
-        public FileModel File { get; set; }
-
-        [Required]
-        public int SharedWithUserId { get; set; }
-
-        [ForeignKey("SharedWithUserId")]
-        public User SharedWithUser { get; set; }
-
-        [Required]
-        public DateTime SharedDate { get; set; }
-
-        public bool IsActive { get; set; } = true;
+        public virtual FileEntity File { get; set; }
+        public virtual User SharedByUser { get; set; }
+        public virtual User SharedWithUser { get; set; }
     }
 } 
