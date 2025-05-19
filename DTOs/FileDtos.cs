@@ -8,6 +8,9 @@ namespace ShareVault.API.DTOs
         public long Size { get; set; }
         public DateTime UploadedAt { get; set; }
         public string UploadedBy { get; set; } = null!;
+        public string UserId { get; set; } = null!;
+        public required string Icon { get; set; }
+        public required string FileType { get; set; }
     }
 
     public class FileDetailsDto : FileDto

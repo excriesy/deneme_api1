@@ -2,56 +2,129 @@ import api from './api';
 
 export interface FileDto {
     id: string;
-    fileName: string;
-    fileSize: number;
-    uploadDate: string;
-    downloadUrl: string;
+    name: string;
+    contentType: string;
+    size: number;
+    uploadedAt: string;
+    uploadedBy: string;
+    userId: string;
+    icon?: string;
+    fileType?: string;
+}
+
+export interface FileDetailsDto extends FileDto {
+    path: string;
+    isPublic: boolean;
+    expiresAt?: string;
+}
+
+export interface SharedFileDto {
+    id: string;
+    fileId: string;
+    sharedWithUserId: string;
+    sharedAt: string;
+    expiresAt?: string;
+    canEdit: boolean;
+}
+
+interface UploadProgressEvent {
+    loaded: number;
+    total: number;
+}
+
+interface UploadConfig {
+    headers: {
+        'Content-Type': string;
+    };
+    onUploadProgress?: (progressEvent: UploadProgressEvent) => void;
+    signal?: AbortSignal;
+}
+
+interface UserResponse {
+    id: string;
+    email: string;
+    username: string;
+}
+
+interface TempUploadResponse {
+    tempFileName: string;
+    originalName: string;
 }
 
 const fileService = {
-    getFiles: async (): Promise<FileDto[]> => {
-        const response = await api.get<FileDto[]>('/api/File/list');
+    async getFiles(): Promise<FileDto[]> {
+        const response = await api.get<FileDto[]>('/file/list');
         return response.data;
     },
 
-    uploadFile: async (file: File): Promise<FileDto> => {
+    async uploadTempFile(file: File, onProgress?: (progressEvent: UploadProgressEvent) => void, signal?: AbortSignal): Promise<TempUploadResponse> {
         const formData = new FormData();
         formData.append('file', file);
-        const response = await api.post<FileDto>('/api/File/upload', formData, {
+
+        const config: UploadConfig = {
             headers: {
                 'Content-Type': 'multipart/form-data',
             },
-        });
+            onUploadProgress: (progressEvent: any) => {
+                if (onProgress && progressEvent.total) {
+                    onProgress({
+                        loaded: progressEvent.loaded,
+                        total: progressEvent.total
+                    });
+                }
+            },
+            signal
+        };
+
+        const response = await api.post<TempUploadResponse>('/file/upload-temp', formData, config);
         return response.data;
     },
 
-    downloadFile: async (fileId: string): Promise<Blob> => {
-        const response = await api.get(`/api/File/download/${fileId}`, {
-            responseType: 'blob',
+    async completeUpload(tempFileName: string, originalFileName: string): Promise<string> {
+        const response = await api.post<{ fileId: string }>('/file/complete-upload', {
+            tempFileName,
+            originalFileName
+        });
+        return response.data.fileId;
+    },
+
+    async cancelUpload(tempFileName: string): Promise<void> {
+        await api.post('/file/cancel-upload', { tempFileName });
+    },
+
+    async downloadFile(fileId: string): Promise<Blob> {
+        const response = await api.get(`/file/download/${fileId}`, {
+            responseType: 'blob'
         });
         return response.data as Blob;
     },
 
-    deleteFile: async (fileId: string): Promise<void> => {
-        await api.delete(`/api/File/${fileId}`);
+    async deleteFile(fileId: string): Promise<void> {
+        await api.delete(`/file/${fileId}`);
     },
 
-    shareFile: async (fileId: string, email: string): Promise<void> => {
-        await api.post(`/api/File/share`, { fileId, email });
+    async shareFile(fileId: string, email: string): Promise<void> {
+        const userResponse = await api.get<UserResponse>(`/user/by-email/${email}`);
+        const userId = userResponse.data.id;
+        
+        await api.post('/file/share-multiple', {
+            fileId,
+            userIds: [userId]
+        });
     },
 
-    getSharedFiles: async (): Promise<FileDto[]> => {
-        const response = await api.get<FileDto[]>('/api/File/shared-files');
+    async getSharedFiles(): Promise<FileDto[]> {
+        const response = await api.get<FileDto[]>('/file/shared-files');
         return response.data;
     },
 
-    getPublicFiles: async (): Promise<FileDto[]> => {
-        const response = await api.get<FileDto[]>('/api/File/public-files');
+    async getPublicFiles(): Promise<FileDto[]> {
+        const response = await api.get<FileDto[]>('/file/public-files');
         return response.data;
     },
 
-    revokeAccess: async (fileId: string, sharedWithUserId: string): Promise<void> => {
-        await api.post('/api/File/revoke-access', { fileId, sharedWithUserId });
+    async revokeAccess(fileId: string, sharedWithUserId: string): Promise<void> {
+        await api.post('/file/revoke-access', { fileId, sharedWithUserId });
     }
 };
 

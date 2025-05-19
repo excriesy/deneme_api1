@@ -1,7 +1,8 @@
 import api from './api';
 
 interface LoginResponse {
-    token: string;
+    jwtToken: string;
+    refreshToken: string;
     user: {
         id: string;
         username: string;
@@ -20,9 +21,10 @@ interface User {
 const authService = {
     login: async (email: string, password: string): Promise<LoginResponse> => {
         try {
-            const response = await api.post<LoginResponse>('/auth/login', { email, password });
-            if (response.data.token) {
-                localStorage.setItem('token', response.data.token);
+            const response = await api.post<LoginResponse>('/Auth/login', { email, password });
+            if (response.data.jwtToken) {
+                localStorage.setItem('token', response.data.jwtToken);
+                localStorage.setItem('refreshToken', response.data.refreshToken);
             }
             return response.data;
         } catch (error: any) {
@@ -36,7 +38,7 @@ const authService = {
 
     register: async (username: string, email: string, password: string): Promise<void> => {
         try {
-            await api.post('/auth/register', { username, email, password });
+            await api.post('/Auth/register', { username, email, password });
         } catch (error: any) {
             console.error('Register error:', error.response?.data || error.message);
             if (error.response) {
@@ -50,20 +52,22 @@ const authService = {
         try {
             const token = localStorage.getItem('token');
             if (token) {
-                await api.post('/auth/logout');
+                await api.post('/Auth/logout');
             }
         } catch (error: any) {
             console.error('Logout error:', error.response?.data || error.message);
         } finally {
             localStorage.removeItem('token');
+            localStorage.removeItem('refreshToken');
         }
     },
 
     async refreshToken(refreshToken: string): Promise<LoginResponse> {
         try {
-            const response = await api.post<LoginResponse>('/auth/refresh', { refreshToken });
-            if (response.data.token) {
-                localStorage.setItem('token', response.data.token);
+            const response = await api.post<LoginResponse>('/Auth/refresh', { refreshToken });
+            if (response.data.jwtToken) {
+                localStorage.setItem('token', response.data.jwtToken);
+                localStorage.setItem('refreshToken', response.data.refreshToken);
             }
             return response.data;
         } catch (error: any) {
@@ -82,7 +86,7 @@ const authService = {
                 throw new Error('Token bulunamadı');
             }
 
-            const response = await api.get<User>('/auth/me');
+            const response = await api.get<User>('/Auth/me');
             return response.data;
         } catch (error: any) {
             console.error('Get current user error:', error.response?.data || error.message);

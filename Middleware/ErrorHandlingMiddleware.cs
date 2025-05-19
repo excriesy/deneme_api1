@@ -79,10 +79,10 @@ namespace ShareVault.API.Middleware
             }
 
             // Hatayı logla
-            await _logService.LogErrorAsync($"HTTP {response.StatusCode} - {context.Request.Method} {context.Request.Path}", ex);
+            var userId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            await _logService.LogErrorAsync($"HTTP {response.StatusCode} - {context.Request.Method} {context.Request.Path}", ex, userId);
 
             // İsteği logla
-            var userId = context.User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
             await _logService.LogRequestAsync(context.Request.Method, context.Request.Path, response.StatusCode, userId);
 
             var result = JsonSerializer.Serialize(errorResponse);

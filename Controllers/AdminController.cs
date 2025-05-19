@@ -72,7 +72,8 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogErrorAsync("Paylaşım geçmişi alınırken hata oluştu", ex);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Paylaşım geçmişi alınırken hata oluştu", ex, userId);
                 return StatusCode(500, "Paylaşım geçmişi alınırken bir hata oluştu");
             }
         }
@@ -138,7 +139,8 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogErrorAsync("İstatistikler alınırken hata oluştu", ex);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("İstatistikler alınırken hata oluştu", ex, userId);
                 return StatusCode(500, "İstatistikler alınırken bir hata oluştu");
             }
         }
@@ -191,7 +193,8 @@ namespace ShareVault.API.Controllers
             }
             catch (Exception ex)
             {
-                await _logService.LogErrorAsync("Tarih aralığı paylaşım geçmişi alınırken hata oluştu", ex);
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Tarih aralığı paylaşım geçmişi alınırken hata oluştu", ex, userId);
                 return StatusCode(500, "Paylaşım geçmişi alınırken bir hata oluştu");
             }
         }

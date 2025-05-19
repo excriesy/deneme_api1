@@ -1,7 +1,9 @@
 import axios from 'axios';
+import { message } from 'antd';
+import authService from './authService';
 
 const api = axios.create({
-    baseURL: 'http://localhost:5112/api',
+    baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5112/api',
     headers: {
         'Content-Type': 'application/json',
     },
@@ -18,7 +20,6 @@ api.interceptors.request.use(
         return config;
     },
     (error) => {
-        console.error('Request interceptor error:', error);
         return Promise.reject(error);
     }
 );
@@ -27,17 +28,40 @@ api.interceptors.request.use(
 api.interceptors.response.use(
     (response) => response,
     async (error) => {
-        console.error('Response error:', error.response?.status, error.response?.data);
-        
-        if (error.response?.status === 401) {
-            console.log('Token geçersiz, çıkış yapılıyor...');
-            localStorage.removeItem('token');
-            window.location.href = '/login';
-        } else if (error.response?.status === 403) {
+        const originalRequest = error.config;
+
+        // Token geçersiz ve henüz yenileme denemesi yapılmamışsa
+        if (error.response?.status === 401 && !originalRequest._retry) {
+            originalRequest._retry = true;
+
+            try {
+                const refreshToken = localStorage.getItem('refreshToken');
+                if (!refreshToken) {
+                    throw new Error('Refresh token bulunamadı');
+                }
+
+                const response = await authService.refreshToken(refreshToken);
+                const { jwtToken } = response;
+
+                localStorage.setItem('token', jwtToken);
+                originalRequest.headers.Authorization = `Bearer ${jwtToken}`;
+
+                return api(originalRequest);
+            } catch (refreshError) {
+                // Refresh token da geçersizse çıkış yap
+                localStorage.removeItem('token');
+                localStorage.removeItem('refreshToken');
+                window.location.href = '/login';
+                return Promise.reject(refreshError);
+            }
+        }
+
+        // Diğer hata durumları
+        if (error.response?.status === 403) {
             console.log('Yetkisiz erişim, çıkış yapılıyor...');
             window.location.href = '/login';
         }
-        
+
         return Promise.reject(error);
     }
 );

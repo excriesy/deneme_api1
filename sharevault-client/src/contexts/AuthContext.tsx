@@ -5,47 +5,52 @@ interface User {
     id: string;
     username: string;
     email: string;
+    role: string;
+}
+
+interface LoginResponse {
+    jwtToken: string;
+    refreshToken: string;
+    user: User;
 }
 
 interface AuthContextType {
     user: User | null;
-    isAuthenticated: boolean;
-    isLoading: boolean;
+    loading: boolean;
     login: (email: string, password: string) => Promise<void>;
     register: (username: string, email: string, password: string) => Promise<void>;
     logout: () => Promise<void>;
+    isAuthenticated: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<User | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const initializeAuth = async () => {
+        const initAuth = async () => {
             try {
-                const token = localStorage.getItem('token');
-                if (token) {
-                    const userData = await authService.getCurrentUser();
-                    setUser(userData);
+                if (authService.isAuthenticated()) {
+                    const user = await authService.getCurrentUser();
+                    setUser(user);
                 }
             } catch (error) {
                 console.error('Auth initialization error:', error);
-                localStorage.removeItem('token');
-                setUser(null);
             } finally {
-                setIsLoading(false);
+                setLoading(false);
             }
         };
 
-        initializeAuth();
+        initAuth();
     }, []);
 
     const login = async (email: string, password: string) => {
         try {
             const response = await authService.login(email, password);
-            localStorage.setItem('token', response.token);
+            localStorage.setItem('token', response.jwtToken);
+            localStorage.setItem('refreshToken', response.refreshToken);
             setUser(response.user);
         } catch (error) {
             console.error('Login error:', error);
@@ -65,7 +70,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const logout = async () => {
         try {
             await authService.logout();
-            localStorage.removeItem('token');
             setUser(null);
         } catch (error) {
             console.error('Logout error:', error);
@@ -73,23 +77,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
-    if (isLoading) {
-        return (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-                <div>Yükleniyor...</div>
-            </div>
-        );
-    }
+    const value = {
+        user,
+        loading,
+        login,
+        register,
+        logout,
+        isAuthenticated: !!user
+    };
 
     return (
-        <AuthContext.Provider value={{
-            user,
-            isAuthenticated: !!user,
-            isLoading,
-            login,
-            register,
-            logout
-        }}>
+        <AuthContext.Provider value={value}>
             {children}
         </AuthContext.Provider>
     );

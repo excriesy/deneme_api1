@@ -68,5 +68,17 @@ namespace ShareVault.API.Services
         {
             _logger.LogDebug(message);
         }
+
+        public Task LogInfoAsync(string message, string? userId)
+        {
+            Console.WriteLine($"[INFO] [{userId ?? "System"}] {message}");
+            return Task.CompletedTask;
+        }
+
+        public Task LogWarningAsync(string message, string? userId)
+        {
+            Console.WriteLine($"[WARNING] [{userId ?? "System"}] {message}");
+            return Task.CompletedTask;
+        }
     }
 } 

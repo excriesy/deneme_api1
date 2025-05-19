@@ -20,7 +20,7 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(builder =>
     {
-        builder.WithOrigins("http://localhost:3000") // React uygulamasının adresi
+        builder.WithOrigins("http://localhost:3000", "http://localhost:5173") // React ve Vite uygulamalarının adresleri
                .AllowAnyMethod()
                .AllowAnyHeader()
                .AllowCredentials();
@@ -99,7 +99,7 @@ builder.Services.AddScoped<ICacheService, CacheService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IBruteForceProtectionService, BruteForceProtectionService>();
-builder.Services.AddScoped<IFileService, FileService>();
+builder.Services.AddScoped<ShareVault.API.Interfaces.IFileService, ShareVault.API.Services.FileService>();
 builder.Services.AddHttpContextAccessor();
 
 // Repository registrations

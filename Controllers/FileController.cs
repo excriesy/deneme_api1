@@ -5,7 +5,6 @@ using ShareVault.API.Data;
 using ShareVault.API.Models;
 using System.Security.Claims;
 using System.ComponentModel.DataAnnotations;
-using ShareVault.API.Services;
 using ShareVault.API.Interfaces;
 
 namespace ShareVault.API.Controllers
@@ -23,55 +22,129 @@ namespace ShareVault.API.Controllers
         private readonly IWebHostEnvironment _environment;
         private const long MaxFileSize = 100 * 1024 * 1024; // 100MB
         private static readonly string[] AllowedExtensions = { ".pdf", ".doc", ".docx", ".txt", ".jpg", ".jpeg", ".png", ".gif" };
-        private readonly IFileService _fileService;
+        private readonly ShareVault.API.Interfaces.IFileService _fileService;
         private readonly ILogService _logService;
+        private readonly string _tempUploadPath;
 
-        public FileController(AppDbContext context, IWebHostEnvironment environment, IFileService fileService, ILogService logService)
+        public FileController(AppDbContext context, IWebHostEnvironment environment, ShareVault.API.Interfaces.IFileService fileService, ILogService logService)
         {
             _context = context;
             _environment = environment;
             _fileService = fileService;
             _logService = logService;
+            _tempUploadPath = Path.Combine(_environment.ContentRootPath, "TempUploads");
+            
+            if (!Directory.Exists(_tempUploadPath))
+            {
+                Directory.CreateDirectory(_tempUploadPath);
+            }
         }
 
         /// <summary>
-        /// Yeni bir dosya yükler.
+        /// Yeni bir dosyayı geçici olarak yükler.
         /// </summary>
         /// <param name="file">Yüklenecek dosya</param>
-        /// <returns>Yüklenen dosyanın ID ve adı</returns>
+        /// <returns>Yüklenen dosyanın geçici adı ve orijinal adı</returns>
         /// <response code="200">Dosya başarıyla yüklendi</response>
         /// <response code="400">Geçersiz dosya boyutu veya türü</response>
         /// <response code="401">Yetkilendirme hatası</response>
-        [HttpPost("upload")]
+        [HttpPost("upload-temp")]
         [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        public async Task<IActionResult> UploadFile(IFormFile file)
+        public async Task<IActionResult> UploadTempFile(IFormFile file)
         {
             try
-        {
-            if (file == null || file.Length == 0)
+            {
+                if (file == null || file.Length == 0)
                     return BadRequest("Dosya seçilmedi");
 
-            if (file.Length > MaxFileSize)
+                if (file.Length > MaxFileSize)
                     return BadRequest($"Dosya boyutu {MaxFileSize / (1024 * 1024)}MB'dan büyük olamaz");
 
-            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-            if (!AllowedExtensions.Contains(extension))
+                var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+                if (!AllowedExtensions.Contains(extension))
                     return BadRequest("Geçersiz dosya türü");
 
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                     return Unauthorized();
 
-                var fileId = await _fileService.UploadFileAsync(file, userId);
+                var tempFileName = $"{Guid.NewGuid()}{extension}";
+                var tempFilePath = Path.Combine(_tempUploadPath, tempFileName);
+
+                using (var stream = new FileStream(tempFilePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(stream);
+                }
+
+                return Ok(new { tempFileName, originalName = file.FileName });
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Geçici dosya yükleme hatası", ex, userId);
+                return StatusCode(500, "Dosya yüklenirken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Geçici olarak yüklenen dosyayı kalıcı hale getirir.
+        /// </summary>
+        /// <param name="request">Tamamlama isteği</param>
+        /// <returns>Yüklenen dosyanın ID</returns>
+        /// <response code="200">Dosya başarıyla yüklendi</response>
+        /// <response code="404">Geçici dosya bulunamadı</response>
+        [HttpPost("complete-upload")]
+        [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> CompleteUpload([FromBody] CompleteUploadRequest request)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var tempFilePath = Path.Combine(_tempUploadPath, request.TempFileName);
+                if (!System.IO.File.Exists(tempFilePath))
+                    return NotFound("Geçici dosya bulunamadı");
+
+                var fileId = await _fileService.CompleteUploadAsync(tempFilePath, request.OriginalFileName, userId);
                 return Ok(new { fileId });
             }
             catch (Exception ex)
             {
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                await _logService.LogErrorAsync("Dosya yükleme hatası", ex, userId);
+                await _logService.LogErrorAsync("Dosya yükleme tamamlama hatası", ex, userId);
                 return StatusCode(500, "Dosya yüklenirken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Geçici olarak yüklenen dosyayı siler.
+        /// </summary>
+        /// <param name="request">İptal isteği</param>
+        /// <returns>İşlem sonucu</returns>
+        /// <response code="200">Geçici dosya başarıyla silindi</response>
+        /// <response code="404">Geçici dosya bulunamadı</response>
+        [HttpPost("cancel-upload")]
+        [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public IActionResult CancelUpload([FromBody] CancelUploadRequest request)
+        {
+            try
+            {
+                var tempFilePath = Path.Combine(_tempUploadPath, request.TempFileName);
+                if (System.IO.File.Exists(tempFilePath))
+                {
+                    System.IO.File.Delete(tempFilePath);
+                }
+                return Ok("Geçici dosya başarıyla silindi");
+            }
+            catch
+            {
+                return StatusCode(500, "Geçici dosya silinirken bir hata oluştu");
             }
         }
 
@@ -90,13 +163,13 @@ namespace ShareVault.API.Controllers
         public async Task<IActionResult> DownloadFile(string fileId)
         {
             try
-        {
+            {
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                     return Unauthorized();
             
                 var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId);
-            if (file == null)
+                if (file == null)
                     return NotFound("Dosya bulunamadı");
 
                 var fileBytes = await _fileService.DownloadFileAsync(fileId, userId);
@@ -130,7 +203,20 @@ namespace ShareVault.API.Controllers
                     return Unauthorized();
 
                 var files = await _fileService.ListFilesAsync(userId);
-                return Ok(files);
+                var fileDtos = files.Select(f => new
+                {
+                    f.Id,
+                    Name = f.Name.TrimStart().TrimEnd(),
+                    f.ContentType,
+                    f.Size,
+                    f.UploadedAt,
+                    UploadedBy = f.UserId == userId ? "Siz" : f.UploadedBy,
+                    f.UserId,
+                    Icon = GetFileIcon(f.ContentType),
+                    FileType = GetFileType(f.ContentType)
+                });
+
+                return Ok(fileDtos);
             }
             catch (Exception ex)
             {
@@ -138,6 +224,40 @@ namespace ShareVault.API.Controllers
                 await _logService.LogErrorAsync("Dosya listeleme hatası", ex, userId);
                 return StatusCode(500, "Dosyalar listelenirken bir hata oluştu");
             }
+        }
+
+        private string GetFileIcon(string contentType)
+        {
+            return contentType.ToLower() switch
+            {
+                var t when t.StartsWith("image/") => "🖼️",
+                var t when t.StartsWith("video/") => "🎥",
+                var t when t.StartsWith("audio/") => "🎵",
+                var t when t.Contains("pdf") => "📄",
+                var t when t.Contains("word") => "📝",
+                var t when t.Contains("excel") || t.Contains("spreadsheet") => "📊",
+                var t when t.Contains("powerpoint") || t.Contains("presentation") => "📑",
+                var t when t.Contains("text") => "📃",
+                var t when t.Contains("zip") || t.Contains("rar") || t.Contains("7z") => "🗜️",
+                _ => "📁"
+            };
+        }
+
+        private string GetFileType(string contentType)
+        {
+            return contentType.ToLower() switch
+            {
+                var t when t.StartsWith("image/") => "Resim",
+                var t when t.StartsWith("video/") => "Video",
+                var t when t.StartsWith("audio/") => "Ses",
+                var t when t.Contains("pdf") => "PDF",
+                var t when t.Contains("word") => "Word",
+                var t when t.Contains("excel") || t.Contains("spreadsheet") => "Excel",
+                var t when t.Contains("powerpoint") || t.Contains("presentation") => "PowerPoint",
+                var t when t.Contains("text") => "Metin",
+                var t when t.Contains("zip") || t.Contains("rar") || t.Contains("7z") => "Sıkıştırılmış",
+                _ => "Dosya"
+            };
         }
 
         /// <summary>
@@ -200,7 +320,7 @@ namespace ShareVault.API.Controllers
                 }
 
                 newShares.Add(new SharedFile
-            {
+                {
                     Id = Guid.NewGuid().ToString(),
                     FileId = request.FileId,
                     SharedByUserId = userId,
@@ -223,7 +343,7 @@ namespace ShareVault.API.Controllers
             if (newShares.Any())
             {
                 await _context.SharedFiles.AddRangeAsync(newShares);
-            await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync();
             }
 
             return Ok(new
@@ -247,7 +367,7 @@ namespace ShareVault.API.Controllers
         public async Task<IActionResult> DeleteFile(string fileId)
         {
             try
-        {
+            {
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                     return Unauthorized();
@@ -436,6 +556,41 @@ namespace ShareVault.API.Controllers
                 ShareHistory = shareHistory
             });
         }
+
+        /// <summary>
+        /// Bir dosyayı yayınlar.
+        /// </summary>
+        /// <param name="fileId">Yayınlanacak dosya ID</param>
+        /// <returns>İşlem sonucu</returns>
+        /// <response code="200">Dosya başarıyla yayınlandı</response>
+        /// <response code="404">Dosya bulunamadı</response>
+        [HttpPost("publish/{fileId}")]
+        [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> PublishFile(string fileId)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId && f.UserId == userId);
+                if (file == null)
+                    return NotFound("Dosya bulunamadı");
+
+                file.IsPublic = true;
+                await _context.SaveChangesAsync();
+
+                return Ok("Dosya başarıyla yayınlandı");
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya yayınlama hatası", ex, userId);
+                return StatusCode(500, "Dosya yayınlanırken bir hata oluştu");
+            }
+        }
     }
 
     public class ShareMultipleRequest
@@ -452,5 +607,20 @@ namespace ShareVault.API.Controllers
         public required string UserId { get; set; }
         public bool Success { get; set; }
         public required string Message { get; set; }
+    }
+
+    public class CompleteUploadRequest
+    {
+        [Required]
+        public required string TempFileName { get; set; }
+
+        [Required]
+        public required string OriginalFileName { get; set; }
+    }
+
+    public class CancelUploadRequest
+    {
+        [Required]
+        public required string TempFileName { get; set; }
     }
 } 
