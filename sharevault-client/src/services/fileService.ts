@@ -10,6 +10,8 @@ export interface FileDto {
     userId: string;
     icon?: string;
     fileType?: string;
+    isPreviewable?: boolean;
+    folderId?: string | null;
 }
 
 export interface FileDetailsDto extends FileDto {
@@ -52,44 +54,58 @@ interface TempUploadResponse {
 }
 
 const fileService = {
-    async getFiles(): Promise<FileDto[]> {
-        const response = await api.get<FileDto[]>('/file/list');
+    async getFiles(folderId?: string | null): Promise<FileDto[]> {
+        const response = await api.get<FileDto[]>('/file/list', {
+            params: {
+                parentFolderId: folderId
+            }
+        });
         return response.data;
     },
 
-    async uploadTempFile(file: File, onProgress?: (progressEvent: UploadProgressEvent) => void, signal?: AbortSignal): Promise<TempUploadResponse> {
+    async createFolder(folderName: string, parentFolderId?: string | null): Promise<any> {
+        const response = await api.post('/folder/create', {
+            name: folderName,
+            parentFolderId
+        });
+        return response.data;
+    },
+
+    async bulkDelete(fileIds: string[]): Promise<any> {
+        const response = await api.post('/file/bulk-delete', {
+            fileIds
+        });
+        return response.data;
+    },
+
+    async uploadTempFile(file: File, onProgress: (progressEvent: any) => void, signal: AbortSignal): Promise<{ tempFileName: string, originalName: string }> {
         const formData = new FormData();
         formData.append('file', file);
 
-        const config: UploadConfig = {
+        const config: any = {
             headers: {
-                'Content-Type': 'multipart/form-data',
+                'Content-Type': 'multipart/form-data'
             },
-            onUploadProgress: (progressEvent: any) => {
-                if (onProgress && progressEvent.total) {
-                    onProgress({
-                        loaded: progressEvent.loaded,
-                        total: progressEvent.total
-                    });
-                }
-            },
-            signal
+            onUploadProgress: onProgress,
+            signal: signal
         };
 
-        const response = await api.post<TempUploadResponse>('/file/upload-temp', formData, config);
+        const response = await api.post('/file/upload-temp', formData, config);
+        return response.data as { tempFileName: string, originalName: string };
+    },
+
+    async completeUpload(tempFileName: string, originalFileName: string, folderId?: string | null): Promise<any> {
+        const response = await api.post('/file/complete-upload', {
+            tempFileName,
+            originalFileName,
+            folderId
+        });
         return response.data;
     },
 
-    async completeUpload(tempFileName: string, originalFileName: string): Promise<string> {
-        const response = await api.post<{ fileId: string }>('/file/complete-upload', {
-            tempFileName,
-            originalFileName
-        });
-        return response.data.fileId;
-    },
-
-    async cancelUpload(tempFileName: string): Promise<void> {
-        await api.post('/file/cancel-upload', { tempFileName });
+    async cancelUpload(tempFileName: string): Promise<any> {
+        const response = await api.post('/file/cancel-upload', { tempFileName });
+        return response.data;
     },
 
     async downloadFile(fileId: string): Promise<Blob> {
@@ -99,18 +115,14 @@ const fileService = {
         return response.data as Blob;
     },
 
-    async deleteFile(fileId: string): Promise<void> {
-        await api.delete(`/file/${fileId}`);
+    async deleteFile(fileId: string): Promise<any> {
+        const response = await api.delete(`/file/${fileId}`);
+        return response.data;
     },
 
-    async shareFile(fileId: string, email: string): Promise<void> {
-        const userResponse = await api.get<UserResponse>(`/user/by-email/${email}`);
-        const userId = userResponse.data.id;
-        
-        await api.post('/file/share-multiple', {
-            fileId,
-            userIds: [userId]
-        });
+    async shareFile(fileId: string, email: string): Promise<any> {
+        const response = await api.post('/file/share-multiple', { fileIds: [fileId], userEmails: [email] });
+        return response.data;
     },
 
     async getSharedFiles(): Promise<FileDto[]> {

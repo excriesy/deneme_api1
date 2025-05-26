@@ -16,9 +16,14 @@ namespace ShareVault.API.Models
         public DateTime UploadedAt { get; set; }
         public bool IsPublic { get; set; }
         public DateTime? ExpiresAt { get; set; }
+        public string? FolderId { get; set; }
 
         [ForeignKey("UserId")]
         public virtual User? UploadedBy { get; set; }
+
+        [ForeignKey("FolderId")]
+        public virtual Folder? Folder { get; set; }
+
         public virtual ICollection<SharedFile> SharedFiles { get; set; } = new List<SharedFile>();
     }
 } 

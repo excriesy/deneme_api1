@@ -16,6 +16,7 @@ namespace ShareVault.API.Data
         public DbSet<SharedFile> SharedFiles { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<LogEntry> Logs { get; set; }
+        public DbSet<Folder> Folders { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

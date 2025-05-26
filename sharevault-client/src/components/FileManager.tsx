@@ -28,15 +28,24 @@ const FileManager: React.FC = () => {
     const [cancelToken, setCancelToken] = useState<AbortController | null>(null);
     const [tempFileName, setTempFileName] = useState<string | null>(null);
     const { user } = useAuth();
+    const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+    const [createFolderModalVisible, setCreateFolderModalVisible] = useState(false);
+    const [createFolderForm] = Form.useForm();
+    const [searchText, setSearchText] = useState('');
+    const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
 
     useEffect(() => {
         loadFiles();
     }, []);
 
+    useEffect(() => {
+        loadFiles();
+    }, [currentFolderId]);
+
     const loadFiles = async () => {
         try {
             setLoading(true);
-            const fileList = await fileService.getFiles();
+            const fileList = await fileService.getFiles(currentFolderId);
             setFiles(fileList);
         } catch (error: any) {
             message.error('Dosyalar yüklenirken bir hata oluştu: ' + error.message);
@@ -94,7 +103,7 @@ const FileManager: React.FC = () => {
 
         try {
             setLoading(true);
-            await fileService.completeUpload(tempFileName, selectedFile.name);
+            await fileService.completeUpload(tempFileName, selectedFile.name, currentFolderId);
             message.success('Dosya başarıyla yüklendi');
             setSelectedFile(null);
             setPreviewImage('');
@@ -219,13 +228,24 @@ const FileManager: React.FC = () => {
         setPreviewUrl('');
     };
 
+    // Find the parent folder ID from the currently listed items (if available)
+    const parentFolderItem = files.find(item => item.id === currentFolderId && item.contentType === 'folder');
+    const parentFolderId = parentFolderItem?.folderId; // This is the ParentFolderId from the backend DTO
+
     const columns = [
         {
             title: 'Dosya Adı',
             dataIndex: 'name',
             key: 'name',
             render: (text: string, record: FileDto) => (
-                <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div 
+                    style={{ display: 'flex', alignItems: 'center', cursor: record.contentType === 'folder' ? 'pointer' : 'default' }}
+                    onClick={() => {
+                        if (record.contentType === 'folder') {
+                            setCurrentFolderId(record.id);
+                        }
+                    }}
+                >
                     <span style={{ fontSize: '18px', marginRight: 8, flexShrink: 0 }}>{record.icon || '📄'}</span>
                     <span style={{ wordBreak: 'break-word', flexGrow: 1 }}>{text}</span>
                 </div>
@@ -294,8 +314,94 @@ const FileManager: React.FC = () => {
         },
     ];
 
+    const handleCreateFolder = async (values: { folderName: string }) => {
+        try {
+            setLoading(true);
+            await fileService.createFolder(values.folderName, currentFolderId);
+            message.success('Klasör başarıyla oluşturuldu');
+            setCreateFolderModalVisible(false);
+            createFolderForm.resetFields();
+            await loadFiles();
+        } catch (error: any) {
+            message.error('Klasör oluşturulurken bir hata oluştu: ' + error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedRowKeys.length === 0) {
+            message.warning('Lütfen silinecek dosyaları seçin');
+            return;
+        }
+
+        Modal.confirm({
+            title: 'Seçili dosyaları silmek istediğinize emin misiniz?',
+            content: 'Bu işlem geri alınamaz.',
+            okText: 'Evet',
+            okType: 'danger',
+            cancelText: 'Hayır',
+            onOk: async () => {
+                try {
+                    setLoading(true);
+                    await fileService.bulkDelete(selectedRowKeys);
+                    message.success('Seçili dosyalar başarıyla silindi');
+                    setSelectedRowKeys([]);
+                    await loadFiles();
+                } catch (error: any) {
+                    message.error('Dosyalar silinirken bir hata oluştu: ' + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            }
+        });
+    };
+
+    const rowSelection = {
+        selectedRowKeys,
+        onChange: (newSelectedRowKeys: React.Key[], selectedRows: FileDto[]) => {
+            setSelectedRowKeys(newSelectedRowKeys.map(key => key.toString()));
+        },
+    };
+
+    const filteredFiles = files.filter(file => 
+        file.name.toLowerCase().includes(searchText.toLowerCase())
+    );
+
     return (
-        <div>
+        <div style={{ padding: '20px' }}>
+            <Title level={2}>Dosya Yöneticisi</Title>
+
+            <Space style={{ marginBottom: '20px' }}>
+                {currentFolderId !== null && (
+                    <Button
+                        onClick={() => setCurrentFolderId(parentFolderId || null)}
+                    >
+                        Geri
+                    </Button>
+                )}
+                <Button
+                    type="primary"
+                    onClick={() => setCreateFolderModalVisible(true)}
+                >
+                    Yeni Klasör
+                </Button>
+                <Input.Search
+                    placeholder="Dosya ara..."
+                    allowClear
+                    onSearch={value => setSearchText(value)}
+                    style={{ width: 200 }}
+                />
+                {selectedRowKeys.length > 0 && (
+                    <Button
+                        danger
+                        onClick={handleBulkDelete}
+                    >
+                        Seçili Dosyaları Sil ({selectedRowKeys.length})
+                    </Button>
+                )}
+            </Space>
+
             <Card title="Dosya Yükle" style={{ marginBottom: 16 }}>
                 <Dragger
                     accept="*/*"
@@ -364,9 +470,10 @@ const FileManager: React.FC = () => {
             <Card title="Dosyalarım">
                 <Table
                     columns={columns}
-                    dataSource={files}
+                    dataSource={filteredFiles}
                     rowKey="id"
                     loading={loading}
+                    rowSelection={rowSelection}
                     locale={{
                         emptyText: 'Henüz dosya yüklenmemiş'
                     }}
@@ -419,6 +526,43 @@ const FileManager: React.FC = () => {
                 width={600}
             >
                 <img src={previewUrl} alt="Dosya Önizleme" style={{ width: '100%' }} />
+            </Modal>
+
+            {/* Klasör Oluşturma Modalı */}
+            <Modal
+                title="Yeni Klasör Oluştur"
+                open={createFolderModalVisible}
+                onCancel={() => {
+                    setCreateFolderModalVisible(false);
+                    createFolderForm.resetFields();
+                }}
+                footer={null}
+            >
+                <Form form={createFolderForm} onFinish={handleCreateFolder}>
+                    <Form.Item
+                        name="folderName"
+                        label="Klasör Adı"
+                        rules={[
+                            { required: true, message: 'Lütfen klasör adını girin!' },
+                            { min: 3, message: 'Klasör adı en az 3 karakter olmalıdır!' }
+                        ]}
+                    >
+                        <Input placeholder="Klasör adını girin" />
+                    </Form.Item>
+                    <Form.Item>
+                        <Space>
+                            <Button type="primary" htmlType="submit" loading={loading}>
+                                Oluştur
+                            </Button>
+                            <Button onClick={() => {
+                                setCreateFolderModalVisible(false);
+                                createFolderForm.resetFields();
+                            }}>
+                                İptal
+                            </Button>
+                        </Space>
+                    </Form.Item>
+                </Form>
             </Modal>
         </div>
     );

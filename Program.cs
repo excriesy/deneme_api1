@@ -100,6 +100,7 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IBruteForceProtectionService, BruteForceProtectionService>();
 builder.Services.AddScoped<ShareVault.API.Interfaces.IFileService, ShareVault.API.Services.FileService>();
+builder.Services.AddScoped<IFolderService, FolderService>();
 builder.Services.AddHttpContextAccessor();
 
 // Repository registrations
