@@ -85,7 +85,7 @@ namespace ShareVault.API.DTOs
         public required string FileId { get; set; }
 
         [Required]
-        public required List<string> UserIds { get; set; }
+        public required List<string> UserEmails { get; set; }
     }
 
     public class ShareResult

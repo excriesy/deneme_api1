@@ -101,61 +101,45 @@ namespace ShareVault.API.Controllers
         [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> CompleteUpload([FromBody] CompleteUploadRequest request)
         {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             try
             {
-                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 if (string.IsNullOrEmpty(userId))
                 {
                     await _logService.LogErrorAsync("Kullanıcı kimliği bulunamadı", new Exception("Kullanıcı kimliği bulunamadı"), "system");
                     return Unauthorized();
                 }
 
-                await _logService.LogInfoAsync($"Dosya yükleme tamamlama isteği alındı. Temp dosya: {request.TempFileName}, Orijinal dosya: {request.OriginalFileName}", userId);
+                await _logService.LogInfoAsync($"CompleteUpload başlatıldı. TempFileName: {request.TempFileName}, OriginalFileName: {request.OriginalFileName}, FolderId: {request.FolderId}", userId);
 
                 var tempFilePath = Path.Combine(_tempUploadPath, request.TempFileName);
+                await _logService.LogInfoAsync($"Temp dosya yolu: {tempFilePath}", userId);
+
                 if (!System.IO.File.Exists(tempFilePath))
                 {
                     await _logService.LogErrorAsync($"Geçici dosya bulunamadı: {tempFilePath}", new FileNotFoundException($"Geçici dosya bulunamadı: {tempFilePath}"), userId);
-                    return NotFound("Geçici dosya bulunamadı");
+                    return BadRequest("Geçici dosya bulunamadı");
                 }
 
-                try
-                {
-                    var fileId = await _fileService.CompleteUploadAsync(
-                        request.TempFileName,
-                        request.OriginalFileName,
-                        userId,
-                        request.FolderId
-                    );
-                    await _logService.LogInfoAsync($"Dosya yükleme tamamlandı. FileId: {fileId}", userId);
-                    return Ok(new { fileId });
-                }
-                catch (FileNotFoundException ex)
-                {
-                    await _logService.LogErrorAsync($"Dosya bulunamadı hatası: {ex.Message}", ex, userId);
-                    return NotFound(ex.Message);
-                }
-                catch (IOException ex)
-                {
-                    await _logService.LogErrorAsync($"Dosya işleme hatası: {ex.Message}", ex, userId);
-                    return StatusCode(500, $"Dosya işlenirken bir hata oluştu: {ex.Message}");
-                }
-                catch (DbUpdateException ex)
-                {
-                    await _logService.LogErrorAsync($"Veritabanı hatası: {ex.Message}", ex, userId);
-                    return StatusCode(500, "Dosya veritabanına kaydedilirken bir hata oluştu");
-                }
-                catch (Exception ex)
-                {
-                    await _logService.LogErrorAsync($"Beklenmeyen hata: {ex.Message}", ex, userId);
-                    return StatusCode(500, "Dosya yüklenirken beklenmeyen bir hata oluştu");
-                }
+                var fileInfo = new FileInfo(tempFilePath);
+                await _logService.LogInfoAsync($"Geçici dosya bilgileri - Boyut: {fileInfo.Length}, Oluşturulma: {fileInfo.CreationTime}, Son Değişiklik: {fileInfo.LastWriteTime}", userId);
+
+                await _logService.LogInfoAsync("Dosya bulundu, CompleteUploadAsync çağrılıyor...", userId);
+                var fileId = await _fileService.CompleteUploadAsync(tempFilePath, request.OriginalFileName, userId, request.FolderId);
+                await _logService.LogInfoAsync($"Dosya yükleme tamamlandı. FileId: {fileId}", userId);
+
+                return Ok(new { fileId });
             }
             catch (Exception ex)
             {
-                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                await _logService.LogErrorAsync("Dosya yükleme tamamlama hatası", ex, userId);
-                return StatusCode(500, "Dosya yüklenirken bir hata oluştu");
+                await _logService.LogErrorAsync($"Dosya yükleme tamamlama hatası: {ex.Message}", ex, userId);
+                await _logService.LogErrorAsync($"Stack Trace: {ex.StackTrace}", ex, userId);
+                if (ex.InnerException != null)
+                {
+                    await _logService.LogErrorAsync($"Inner Exception: {ex.InnerException.Message}", ex.InnerException, userId);
+                    await _logService.LogErrorAsync($"Inner Exception Stack Trace: {ex.InnerException.StackTrace}", ex.InnerException, userId);
+                }
+                return StatusCode(500, $"Dosya yükleme tamamlanırken bir hata oluştu: {ex.Message}");
             }
         }
 
@@ -274,38 +258,37 @@ namespace ShareVault.API.Controllers
             }
         }
 
-        private string GetFileIcon(string contentType)
+        /// <summary>
+        /// Mevcut kullanıcıyla paylaşılan dosyaları listeler.
+        /// </summary>
+        /// <returns>Paylaşılan dosya listesi</returns>
+        /// <response code="200">Paylaşılan dosyalar başarıyla getirildi</response>
+        /// <response code="401">Yetkilendirme hatası</response>
+        /// <response code="500">Sunucu hatası</response>
+        [HttpGet("shared-files")]
+        [ProducesResponseType(typeof(IEnumerable<FileDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public async Task<IActionResult> GetSharedFiles()
         {
-            return contentType.ToLower() switch
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
             {
-                var t when t.StartsWith("image/") => "🖼️",
-                var t when t.StartsWith("video/") => "🎥",
-                var t when t.StartsWith("audio/") => "🎵",
-                var t when t.Contains("pdf") => "📄",
-                var t when t.Contains("word") => "📝",
-                var t when t.Contains("excel") || t.Contains("spreadsheet") => "📊",
-                var t when t.Contains("powerpoint") || t.Contains("presentation") => "📑",
-                var t when t.Contains("text") => "📃",
-                var t when t.Contains("zip") || t.Contains("rar") || t.Contains("7z") => "🗜️",
-                _ => "📁"
-            };
-        }
+                await _logService.LogErrorAsync("Kullanıcı kimliği bulunamadı (Paylaşılan Dosyalar)", new Exception("Kullanıcı kimliği bulunamadı"), "system");
+                return Unauthorized();
+            }
 
-        private string GetFileType(string contentType)
-        {
-            return contentType.ToLower() switch
+            try
             {
-                var t when t.StartsWith("image/") => "Resim",
-                var t when t.StartsWith("video/") => "Video",
-                var t when t.StartsWith("audio/") => "Ses",
-                var t when t.Contains("pdf") => "PDF",
-                var t when t.Contains("word") => "Word",
-                var t when t.Contains("excel") || t.Contains("spreadsheet") => "Excel",
-                var t when t.Contains("powerpoint") || t.Contains("presentation") => "PowerPoint",
-                var t when t.Contains("text") => "Metin",
-                var t when t.Contains("zip") || t.Contains("rar") || t.Contains("7z") => "Sıkıştırılmış",
-                _ => "Dosya"
-            };
+                await _logService.LogInfoAsync($"Kullanıcı {userId} için paylaşılan dosyalar listesi isteniyor.", userId);
+                var sharedFiles = await _fileService.ListSharedFilesAsync(userId);
+                return Ok(sharedFiles);
+            }
+            catch (Exception ex)
+            {
+                await _logService.LogErrorAsync($"Kullanıcı {userId} için paylaşılan dosyalar listelenirken hata: {ex.Message}", ex, userId);
+                return StatusCode(500, "Paylaşılan dosyalar listelenirken bir hata oluştu.");
+            }
         }
 
         /// <summary>
@@ -332,37 +315,36 @@ namespace ShareVault.API.Controllers
             if (file == null)
                 return NotFound("Dosya bulunamadı veya bu dosyayı paylaşma yetkiniz yok.");
 
-            if (request.UserIds.Contains(userId))
-                return BadRequest("Kendinizle dosya paylaşamazsınız.");
-
-            // Kullanıcı ID'lerinin geçerliliğini kontrol et
-            var validUsers = await _context.Users
-                .Where(u => request.UserIds.Contains(u.Id))
-                .Select(u => new { u.Id, u.Username })
+            // Kullanıcıların ID'lerini e-posta adreslerine göre bul
+            var sharedWithUsers = await _context.Users
+                .Where(u => request.UserEmails.Contains(u.Email))
                 .ToListAsync();
 
-            if (!validUsers.Any())
+            if (!sharedWithUsers.Any())
                 return BadRequest("Geçerli kullanıcı bulunamadı.");
+
+            // Kendi e-posta adresini paylaşılanlar listesinden çıkar
+            sharedWithUsers.RemoveAll(u => u.Id == userId);
+
+            if (!sharedWithUsers.Any())
+                return BadRequest("Kendinizle veya geçersiz kullanıcılarla dosya paylaşamazsınız.");
 
             var results = new List<ShareResult>();
             var existingShares = await _context.SharedFiles
-                .Where(sf => sf.FileId == request.FileId && request.UserIds.Contains(sf.SharedWithUserId) && sf.IsActive)
+                .Where(sf => sf.FileId == request.FileId && sharedWithUsers.Select(u => u.Id).Contains(sf.SharedWithUserId) && sf.IsActive)
                 .Select(sf => sf.SharedWithUserId)
                 .ToListAsync();
 
             var newShares = new List<SharedFile>();
-            foreach (var user in validUsers)
+            foreach (var sharedWithUser in sharedWithUsers)
             {
-                if (user.Id == userId)
-                    continue;
-
-                if (existingShares.Contains(user.Id))
+                if (existingShares.Contains(sharedWithUser.Id))
                 {
                     results.Add(new ShareResult
                     {
-                        UserId = user.Id,
+                        UserId = sharedWithUser.Id,
                         Success = false,
-                        Message = "Dosya zaten bu kullanıcıyla paylaşılmış"
+                        Message = $"Dosya zaten {sharedWithUser.Username} kullanıcısıyla paylaşılmış"
                     });
                     continue;
                 }
@@ -372,19 +354,19 @@ namespace ShareVault.API.Controllers
                     Id = Guid.NewGuid().ToString(),
                     FileId = request.FileId,
                     SharedByUserId = userId,
-                    SharedWithUserId = user.Id,
+                    SharedWithUserId = sharedWithUser.Id,
                     SharedAt = DateTime.UtcNow,
                     IsActive = true,
                     File = file!,
                     SharedByUser = await _context.Users.FindAsync(userId) ?? throw new InvalidOperationException("Paylaşan kullanıcı bulunamadı"),
-                    SharedWithUser = await _context.Users.FindAsync(user.Id) ?? throw new InvalidOperationException("Paylaşılan kullanıcı bulunamadı")
+                    SharedWithUser = sharedWithUser
                 });
 
                 results.Add(new ShareResult
                 {
-                    UserId = user.Id,
+                    UserId = sharedWithUser.Id,
                     Success = true,
-                    Message = "Dosya başarıyla paylaşıldı"
+                    Message = $"Dosya {sharedWithUser.Username} kullanıcısıyla başarıyla paylaşıldı"
                 });
             }
 
@@ -487,16 +469,25 @@ namespace ShareVault.API.Controllers
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
+            await _logService.LogInfoAsync($"GetSharedUsers isteği alındı. Kullanıcı: {userId}, Dosya ID: {fileId}", userId);
+
             var file = await _context.Files
                 .FirstOrDefaultAsync(f => f.Id == fileId);
 
             if (file == null)
+            {
+                await _logService.LogWarningAsync($"Dosya bulunamadı. Dosya ID: {fileId}", userId);
                 return NotFound("Dosya bulunamadı.");
+            }
 
             if (file.UserId != userId && userRole != "Admin")
+            {
+                await _logService.LogWarningAsync($"Yetkisiz erişim denemesi. Kullanıcı: {userId}, Dosya ID: {fileId}", userId);
                 return Forbid();
+            }
 
             var sharedUsers = await _context.SharedFiles
+                .Include(sf => sf.SharedWithUser)
                 .Where(sf => sf.FileId == fileId && sf.IsActive)
                 .Select(sf => new
                 {
@@ -506,6 +497,8 @@ namespace ShareVault.API.Controllers
                     SharedAt = sf.SharedAt
                 })
                 .ToListAsync();
+
+            await _logService.LogInfoAsync($"Dosya {fileId} için {sharedUsers.Count} adet aktif paylaşım bulundu.", userId);
 
             return Ok(new
             {
@@ -888,7 +881,7 @@ namespace ShareVault.API.Controllers
         public required string FileId { get; set; }
 
         [Required]
-        public required List<string> UserIds { get; set; }
+        public required List<string> UserEmails { get; set; }
     }
 
     public class ShareResult
@@ -906,8 +899,7 @@ namespace ShareVault.API.Controllers
         [Required]
         public required string OriginalFileName { get; set; }
 
-        [Required]
-        public required string FolderId { get; set; }
+        public string? FolderId { get; set; }
     }
 
     public class CancelUploadRequest

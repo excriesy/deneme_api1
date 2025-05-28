@@ -57,7 +57,8 @@ const fileService = {
     async getFiles(folderId?: string | null): Promise<FileDto[]> {
         const response = await api.get<FileDto[]>('/file/list', {
             params: {
-                parentFolderId: folderId
+                parentFolderId: folderId,
+                _t: Date.now()
             }
         });
         return response.data;
@@ -95,11 +96,16 @@ const fileService = {
     },
 
     async completeUpload(tempFileName: string, originalFileName: string, folderId?: string | null): Promise<any> {
-        const response = await api.post('/file/complete-upload', {
+        const requestBody: any = {
             tempFileName,
             originalFileName,
-            folderId
-        });
+        };
+
+        if (folderId) {
+            requestBody.folderId = folderId;
+        }
+
+        const response = await api.post('/file/complete-upload', requestBody);
         return response.data;
     },
 
@@ -121,12 +127,17 @@ const fileService = {
     },
 
     async shareFile(fileId: string, email: string): Promise<any> {
-        const response = await api.post('/file/share-multiple', { fileIds: [fileId], userEmails: [email] });
+        const response = await api.post('/file/share-multiple', { fileId: fileId, userEmails: [email] });
         return response.data;
     },
 
     async getSharedFiles(): Promise<FileDto[]> {
         const response = await api.get<FileDto[]>('/file/shared-files');
+        return response.data;
+    },
+
+    async getSharedUsers(fileId: string): Promise<{ fileId: string, fileName: string, sharedUsers: { userId: string, username: string, email: string, sharedAt: string }[] }> {
+        const response = await api.get<{ fileId: string, fileName: string, sharedUsers: { userId: string, username: string, email: string, sharedAt: string }[] }>(`/file/shared-users/${fileId}`);
         return response.data;
     },
 
@@ -136,7 +147,7 @@ const fileService = {
     },
 
     async revokeAccess(fileId: string, sharedWithUserId: string): Promise<void> {
-        await api.post('/file/revoke-access', { fileId, sharedWithUserId });
+        await api.post('/file/revoke-access', null, { params: { fileId, sharedWithUserId } });
     }
 };
 

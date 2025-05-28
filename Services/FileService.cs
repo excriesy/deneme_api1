@@ -60,21 +60,25 @@ namespace ShareVault.API.Services
 
                 try
                 {
-                    System.IO.File.Move(tempFilePath, filePath);
-                    await _logService.LogInfoAsync("Dosya başarıyla taşındı", userId);
+                    // Dosyayı kopyala ve sonra orijinali sil
+                    System.IO.File.Copy(tempFilePath, filePath, true);
+                    System.IO.File.Delete(tempFilePath);
+                    await _logService.LogInfoAsync("Dosya başarıyla kopyalandı ve geçici dosya silindi", userId);
                 }
                 catch (Exception ex)
                 {
-                    await _logService.LogErrorAsync($"Dosya taşıma hatası: {ex.Message}", ex, userId);
-                    throw new IOException($"Dosya taşıma hatası: {ex.Message}", ex);
+                    await _logService.LogErrorAsync($"Dosya kopyalama hatası: {ex.Message}", ex, userId);
+                    throw new IOException($"Dosya kopyalama hatası: {ex.Message}", ex);
                 }
 
                 var fileInfo = new FileInfo(filePath);
                 if (!fileInfo.Exists)
                 {
-                    await _logService.LogErrorAsync("Dosya taşındıktan sonra bulunamadı", new FileNotFoundException("Dosya taşındıktan sonra bulunamadı"), userId);
-                    throw new FileNotFoundException("Dosya taşındıktan sonra bulunamadı");
+                    await _logService.LogErrorAsync("Dosya kopyalandıktan sonra bulunamadı", new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı"), userId);
+                    throw new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı");
                 }
+
+                await _logService.LogInfoAsync($"Dosya bilgileri - Boyut: {fileInfo.Length}, Oluşturulma: {fileInfo.CreationTime}, Son Değişiklik: {fileInfo.LastWriteTime}", userId);
 
                 var file = new FileModel
                 {
@@ -199,90 +203,116 @@ namespace ShareVault.API.Services
             }
         }
 
-        public async Task<IEnumerable<FileDto>> ListFilesAsync(string userId, string? parentFolderId = null)
+        public async Task<IEnumerable<FileDto>> ListFilesAsync(string userId, string? folderId = null)
         {
-            await _logService.LogInfoAsync($"ListFilesAsync başlatıldı. Kullanıcı: {userId}, Klasör ID: {parentFolderId ?? "Root"}", userId);
+            _logService.LogInformation($"[{userId}] ListFilesAsync başlatıldı. Kullanıcı: {userId}, Klasör ID: {folderId ?? "Root"}");
+
+            // Always fetch from database first
+            _logService.LogInformation($"[{userId}] Veritabanından dosyalar ve klasörler alınıyor. Kullanıcı: {userId}, Klasör ID: {folderId ?? "Root"}");
+            var files = await _context.Files
+                .Include(f => f.UploadedBy)
+                .Where(f => f.FolderId == (folderId == "Root" ? null : folderId) &&
+                           (f.UserId == userId || _context.SharedFiles
+                               .Any(s => s.FileId == f.Id && s.SharedWithUserId == userId && s.IsActive)))
+                .ToListAsync();
+
+            _logService.LogInformation($"[{userId}] Klasördeki dosyalar alındı. Sayı: {files.Count}");
+
+            var folders = await _context.Folders
+                .Where(f => f.ParentFolderId == (folderId == "Root" ? null : folderId) && f.UserId == userId)
+                .ToListAsync();
+
+            _logService.LogInformation($"[{userId}] Klasördeki alt klasörler alındı. Sayı: {folders.Count}");
+
+            // Check if physical files exist for database records
+            var existingFilesOnDisk = files.Where(f =>
+            {
+                var filePath = Path.Combine(_uploadPath, f.Id + Path.GetExtension(f.Name));
+                bool exists = System.IO.File.Exists(filePath);
+                if (!exists)
+                {
+                    // Log that an orphaned file record was found
+                    _logService.LogWarning($"[{userId}] Dikkat: Veritabanında kaydı olan dosya diskte bulunamadı. ID: {f.Id}, Ad: {f.Name}, Path: {filePath}");
+                    // Optionally, you could add logic here to delete the orphaned database record
+                    // _context.Files.Remove(f); // Uncomment to automatically clean up orphaned records
+                }
+                return exists;
+            }).ToList(); // ToList() ekleyerek filtreleme uygulandı
+
+            _logService.LogInformation($"[{userId}] Disk üzerinde bulunan dosyaların sayısı (veritabanından çekilen ve filtrelenen): {existingFilesOnDisk.Count}"); // Log ekledim
+
+            var result = existingFilesOnDisk.Select(f => new FileDto
+            {
+                Id = f.Id,
+                Name = f.Name.TrimStart().TrimEnd(),
+                UserId = f.UserId,
+                Size = f.Size,
+                UploadedAt = f.UploadedAt,
+                ContentType = f.ContentType,
+                UploadedBy = f.UploadedBy?.Username ?? "Bilinmeyen Kullanıcı",
+                Icon = GetFileIcon(f.ContentType),
+                FileType = GetFileType(f.ContentType),
+                IsPreviewable = IsPreviewable(f.ContentType),
+                FolderId = f.FolderId
+            }).Concat(folders.Select(f => new FileDto
+            {
+                Id = f.Id,
+                Name = f.Name.TrimStart().TrimEnd(),
+                UserId = f.UserId,
+                Size = 0,
+                ContentType = "folder",
+                UploadedAt = f.CreatedAt,
+                UploadedBy = f.Owner?.Username ?? "Bilinmeyen Kullanıcı",
+                Icon = "📁",
+                FileType = "Klasör",
+                IsPreviewable = false,
+                FolderId = f.ParentFolderId // Klasörler için ParentFolderId
+            })).ToList(); // ToList() ekleyerek sonuç somutlaştırıldı
+
+            _logService.LogInformation($"[{userId}] ListFilesAsync sonuç listesi hazırlanıyor. Toplam öğe: {result.Count}");
+            foreach (var item in result)
+            {
+                _logService.LogInformation($"[{userId}] Sonuç öğesi - ID: {item.Id}, Ad: {item.Name}, Tür: {item.ContentType}");
+            }
+
+            return result;
+        }
+
+        public async Task<IEnumerable<FileDto>> ListSharedFilesAsync(string userId)
+        {
+            await _logService.LogInfoAsync($"ListSharedFilesAsync başlatıldı. Kullanıcı: {userId}", userId);
             try
             {
-                // Önbellekten kontrol et
-                var cacheKey = $"user_files_and_folders_{userId}_{parentFolderId ?? "root"}";
-                var cachedItems = _cacheService.Get<IEnumerable<object>>(cacheKey);
-                if (cachedItems != null)
+                var sharedFiles = await _context.SharedFiles
+                    .Include(sf => sf.File)
+                        .ThenInclude(f => f.UploadedBy) // Dosya yükleyen kullanıcıyı include et
+                    .Where(sf => sf.SharedWithUserId == userId && sf.IsActive)
+                    .Select(sf => sf.File) // Paylaşılan dosyaları seç
+                    .Where(f => f != null) // Null olanları filtrele (olmamalı ama önlem)
+                    .ToListAsync();
+
+                await _logService.LogInfoAsync($"Kullanıcı {userId} ile paylaşılan dosya sayısı: {sharedFiles.Count}", userId);
+
+                var fileDtos = sharedFiles.Select(file => new FileDto
                 {
-                    await _logService.LogInfoAsync($"Önbellekten dosya/klasör listesi alındı. Kullanıcı: {userId}, Klasör ID: {parentFolderId ?? "Root"}", userId);
-                    return (IEnumerable<FileDto>)cachedItems; // DTO yapısı değişeceği için dönüş tipi object olarak düzenlenecek
-                }
+                    Id = file.Id,
+                    Name = file.Name.TrimStart().TrimEnd(),
+                    Size = file.Size,
+                    UploadedAt = file.UploadedAt,
+                    UploadedBy = file.UploadedBy?.Username ?? "Bilinmeyen Kullanıcı",
+                    UserId = file.UserId,
+                    ContentType = file.ContentType,
+                    Icon = GetFileIcon(file.ContentType), // FileService'deki GetFileIcon metodunu kullan
+                    FileType = GetFileType(file.ContentType), // FileService'deki GetFileType metodunu kullan
+                    IsPreviewable = IsPreviewable(file.ContentType),
+                    FolderId = file.FolderId
+                }).ToList();
 
-                await _logService.LogInfoAsync($"Veritabanından dosyalar ve klasörler alınıyor. Kullanıcı: {userId}, Klasör ID: {parentFolderId ?? "Root"}", userId);
-
-                try
-                {
-                    // Klasördeki dosyaları al (kullanıcının kendi yükledikleri veya kendisiyle paylaşılanlar)
-                    var filesInFolder = await _context.Files
-                        .Include(f => f.UploadedBy)
-                        .Where(f => f.FolderId == parentFolderId && 
-                                    (f.UserId == userId || _context.SharedFiles.Any(sf => sf.FileId == f.Id && sf.SharedWithUserId == userId && sf.IsActive)))
-                        .ToListAsync();
-
-                    await _logService.LogInfoAsync($"Klasördeki dosyalar alındı. Sayı: {filesInFolder.Count}", userId);
-
-                    // Klasördeki alt klasörleri al
-                    var subFolders = await _context.Folders
-                        .Where(f => f.ParentFolderId == parentFolderId && f.UserId == userId)
-                        .ToListAsync();
-
-                    await _logService.LogInfoAsync($"Klasördeki alt klasörler alındı. Sayı: {subFolders.Count}", userId);
-
-                    var fileDtos = filesInFolder.Select(file => new FileDto
-                    {
-                        Id = file.Id,
-                        Name = file.Name.TrimStart().TrimEnd(),
-                        Size = file.Size,
-                        UploadedAt = file.UploadedAt,
-                        UploadedBy = file.UploadedBy?.Username ?? "Bilinmeyen Kullanıcı",
-                        UserId = file.UserId,
-                        ContentType = file.ContentType,
-                        Icon = GetFileIcon(file.ContentType),
-                        FileType = GetFileType(file.ContentType),
-                        IsPreviewable = IsPreviewable(file.ContentType)
-                    }).ToList();
-
-                    var folderDtos = subFolders.Select(folder => new FileDto // Klasörleri de FileDto gibi gösterelim
-                    {
-                        Id = folder.Id,
-                        Name = folder.Name,
-                        Size = 0, // Klasörlerin boyutu 0 olarak gösterilebilir
-                        UploadedAt = folder.CreatedAt,
-                        UploadedBy = folder.Owner?.Username ?? "Bilinmeyen Kullanıcı",
-                        UserId = folder.UserId,
-                        ContentType = "folder", // Klasör tipi belirtmek için
-                        Icon = "📁", // Klasör ikonu
-                        FileType = "Klasör",
-                        IsPreviewable = false,
-                        FolderId = folder.ParentFolderId // Add ParentFolderId here (Mapping to FolderId in FileDto)
-                    }).ToList();
-
-                    // Dosya ve klasör listelerini birleştir ve sırala
-                    var combinedList = folderDtos.Concat(fileDtos)
-                        .OrderByDescending(item => item.UploadedAt) // Tarihe göre tersten sırala (en yeni üste)
-                        .ToList();
-
-                    await _logService.LogInfoAsync($"Birleştirilmiş dosya/klasör sayısı: {combinedList.Count}", userId);
-
-                    // Önbelleğe kaydet
-                    _cacheService.Set(cacheKey, combinedList, TimeSpan.FromMinutes(1));
-
-                    return combinedList;
-                }
-                catch (Exception ex)
-                {
-                    await _logService.LogErrorAsync($"Veritabanı işlemleri sırasında hata: {ex.Message}", ex, userId);
-                    throw;
-                }
+                return fileDtos;
             }
             catch (Exception ex)
             {
-                await _logService.LogErrorAsync($"Dosya ve klasör listesi alınırken hata: {ex.Message}", ex, userId);
+                await _logService.LogErrorAsync($"Kullanıcı {userId} ile paylaşılan dosyalar listelenirken hata: {ex.Message}", ex, userId);
                 throw;
             }
         }

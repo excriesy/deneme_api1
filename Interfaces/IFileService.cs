@@ -10,5 +10,6 @@ namespace ShareVault.API.Interfaces
         Task<IEnumerable<FileDto>> ListFilesAsync(string userId, string? parentFolderId = null);
         Task ShareFileAsync(string fileId, string sharedWithUserId, string sharedByUserId);
         Task RevokeAccessAsync(string fileId, string sharedWithUserId);
+        Task<IEnumerable<FileDto>> ListSharedFilesAsync(string userId);
     }
 } 
