@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Upload, message, Modal, Form, Input, Space, Card, Typography, Progress, Image, Tooltip } from 'antd';
-import { UploadOutlined, DownloadOutlined, ShareAltOutlined, DeleteOutlined, InboxOutlined, FileOutlined, IeOutlined } from '@ant-design/icons';
+import { Table, Button, Upload, message, Modal, Form, Input, Space, Card, Typography, Progress, Image, Tooltip, Dropdown } from 'antd';
+import { UploadOutlined, DownloadOutlined, ShareAltOutlined, DeleteOutlined, InboxOutlined, FileOutlined, IeOutlined, MoreOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import fileService, { FileDto } from '../services/fileService';
 import { useAuth } from '../contexts/AuthContext';
@@ -42,6 +42,10 @@ const FileManager: React.FC = () => {
     const [selectedFileForSharedUsers, setSelectedFileForSharedUsers] = useState<FileDto | null>(null);
     const [fileSharedUsers, setFileSharedUsers] = useState<any[]>([]); // Paylaşılan kullanıcı listesi
     const [loadingSharedUsers, setLoadingSharedUsers] = useState(false); // Paylaşılan kullanıcılar listesi yükleniyor mu?
+
+    const [renameModalVisible, setRenameModalVisible] = useState(false);
+    const [selectedFolder, setSelectedFolder] = useState<FileDto | null>(null);
+    const [renameForm] = Form.useForm();
 
     useEffect(() => {
         loadFiles();
@@ -258,6 +262,25 @@ const FileManager: React.FC = () => {
     const parentFolderItem = files.find(item => item.id === currentFolderId && item.contentType === 'folder');
     const parentFolderId = parentFolderItem?.folderId;
 
+    const showRenameModal = (record: FileDto) => {
+        setSelectedFolder(record);
+        renameForm.setFieldsValue({ newName: record.name });
+        setRenameModalVisible(true);
+    };
+
+    const handleRenameSubmit = async () => {
+        try {
+            const values = await renameForm.validateFields();
+            if (selectedFolder) {
+                await handleRenameFolder(selectedFolder.id, values.newName);
+                setRenameModalVisible(false);
+                renameForm.resetFields();
+            }
+        } catch (error) {
+            // Form validation failed
+        }
+    };
+
     const columns = [
         {
             title: 'Dosya Adı',
@@ -299,61 +322,69 @@ const FileManager: React.FC = () => {
             key: 'actions',
             render: (_: any, record: FileDto) => (
                 <Space>
-                    {record.contentType.startsWith('image/') && (record.isPreviewable ?? true) && (
-                        <Tooltip title="Önizle">
-                            <Button
-                                icon={<IeOutlined />}
-                                onClick={() => handlePreview(record.id, record.name)}
-                                type="text"
-                            />
-                        </Tooltip>
-                    )}
-                    <Tooltip title="İndir">
-                        <Button
-                            icon={<DownloadOutlined />}
-                            onClick={() => handleDownload(record.id, record.name)}
-                            type="text"
-                        />
-                    </Tooltip>
-                    {record.userId === user?.id && (
-                        <Tooltip title="Sil">
-                            <Button
-                                icon={<DeleteOutlined />}
-                                onClick={() => handleDelete(record.id)}
-                                type="text"
-                                danger
-                            />
-                        </Tooltip>
-                    )}
-                    <Tooltip title="Paylaş">
-                        <Button
-                            icon={<ShareAltOutlined />}
-                            onClick={() => {
-                                if (record.userId === user?.id) {
-                                    setSelectedFileForShare(record);
-                                    setShareModalVisible(true);
-                                } else {
-                                    message.info('Bu dosyayı paylaşma yetkiniz yok.');
-                                }
+                    {record.contentType === 'folder' ? (
+                        <Dropdown
+                            menu={{
+                                items: [
+                                    {
+                                        key: 'rename',
+                                        label: 'Yeniden Adlandır',
+                                        onClick: () => showRenameModal(record)
+                                    },
+                                    {
+                                        key: 'delete',
+                                        label: 'Sil',
+                                        danger: true,
+                                        onClick: () => handleDelete(record.id)
+                                    }
+                                ]
                             }}
-                            type="text"
-                        />
-                    </Tooltip>
-                    <Tooltip title="Paylaşım Detayları">
-                         <Button
-                             icon={<FileOutlined />}
-                             onClick={() => {
-                                if (record.userId === user?.id) {
-                                    // Kendi dosyanızsa paylaşım detaylarını göster
-                                    handleViewSharedUsers(record.id, record.name);
-                                } else {
-                                    // Başkasının sizinle paylaştığı dosyaysa yetki uyarısı ver
-                                    message.info('Bu dosyanın paylaşım detaylarını görme yetkiniz yok.');
-                                }
-                            }}
-                             type="text"
-                         />
-                    </Tooltip>
+                        >
+                            <Button icon={<MoreOutlined />} type="text" />
+                        </Dropdown>
+                    ) : (
+                        <>
+                            {record.contentType.startsWith('image/') && (record.isPreviewable ?? true) && (
+                                <Tooltip title="Önizle">
+                                    <Button
+                                        icon={<IeOutlined />}
+                                        onClick={() => handlePreview(record.id, record.name)}
+                                        type="text"
+                                    />
+                                </Tooltip>
+                            )}
+                            <Tooltip title="İndir">
+                                <Button
+                                    icon={<DownloadOutlined />}
+                                    onClick={() => handleDownload(record.id, record.name)}
+                                    type="text"
+                                />
+                            </Tooltip>
+                            {record.userId === user?.id && (
+                                <Tooltip title="Sil">
+                                    <Button
+                                        icon={<DeleteOutlined />}
+                                        onClick={() => handleDelete(record.id)}
+                                        type="text"
+                                        danger
+                                    />
+                                </Tooltip>
+                            )}
+                            <Tooltip title="Paylaş">
+                                <Button
+                                    icon={<ShareAltOutlined />}
+                                    onClick={() => {
+                                        if (record.userId === user?.id) {
+                                            handleShareClick(record);
+                                        } else {
+                                            message.info('Bu dosyayı paylaşma yetkiniz yok.');
+                                        }
+                                    }}
+                                    type="text"
+                                />
+                            </Tooltip>
+                        </>
+                    )}
                 </Space>
             ),
         },
@@ -531,6 +562,24 @@ const FileManager: React.FC = () => {
                  }
             }
          });
+    };
+
+    const handleRenameFolder = async (folderId: string, newName: string) => {
+        try {
+            setLoading(true);
+            await fileService.renameFolder(folderId, newName);
+            message.success('Klasör başarıyla yeniden adlandırıldı');
+            await loadFiles();
+        } catch (error: any) {
+            message.error('Klasör yeniden adlandırılırken bir hata oluştu: ' + error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleShareClick = (file: FileDto) => {
+        setSelectedFileForShare(file);
+        setShareModalVisible(true);
     };
 
     return (
@@ -798,6 +847,27 @@ const FileManager: React.FC = () => {
                         emptyText: 'Bu dosya henüz kimseyle paylaşılmamış.'
                     }}
                  />
+            </Modal>
+
+            <Modal
+                title="Klasörü Yeniden Adlandır"
+                open={renameModalVisible}
+                onOk={handleRenameSubmit}
+                onCancel={() => {
+                    setRenameModalVisible(false);
+                    renameForm.resetFields();
+                }}
+                okText="Yeniden Adlandır"
+                cancelText="İptal"
+            >
+                <Form form={renameForm}>
+                    <Form.Item
+                        name="newName"
+                        rules={[{ required: true, message: 'Lütfen yeni klasör adını girin!' }]}
+                    >
+                        <Input />
+                    </Form.Item>
+                </Form>
             </Modal>
         </div>
     );

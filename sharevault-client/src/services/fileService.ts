@@ -148,6 +148,10 @@ const fileService = {
 
     async revokeAccess(fileId: string, sharedWithUserId: string): Promise<void> {
         await api.post('/file/revoke-access', null, { params: { fileId, sharedWithUserId } });
+    },
+
+    async renameFolder(folderId: string, newName: string): Promise<void> {
+        await api.put(`/folder/${folderId}?name=${encodeURIComponent(newName)}`);
     }
 };
 
