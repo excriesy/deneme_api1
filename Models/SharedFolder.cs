@@ -5,29 +5,29 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace ShareVault.API.Models
 {
     /// <summary>
-    /// Dosya paylaşımlarını temsil eden model sınıfı
+    /// Klasör paylaşımlarını temsil eden model sınıfı
     /// </summary>
-    public class SharedFile
+    public class SharedFolder
     {
         [Key]
         public required string Id { get; set; }
-
+        
         [Required]
-        public required string FileId { get; set; }
-
+        public required string FolderId { get; set; }
+        
         [Required]
         public required string SharedByUserId { get; set; }
-
+        
         [Required]
         public required string SharedWithUserId { get; set; }
-
+        
         public DateTime SharedAt { get; set; }
-
+        
         public DateTime? ExpiresAt { get; set; }
-
+        
         // İzin türü - varsayılan olarak sadece okuma hakkı vererek
         public PermissionType Permission { get; set; } = PermissionType.Read;
-
+        
         public bool IsActive { get; set; } = true;
         
         // Paylaşımın neden/açıklama alanı
@@ -38,8 +38,8 @@ namespace ShareVault.API.Models
         public DateTime? LastAccessedAt { get; set; }
         public int AccessCount { get; set; } = 0;
 
-        [ForeignKey("FileId")]
-        public virtual required FileModel File { get; set; }
+        [ForeignKey("FolderId")]
+        public virtual required Folder Folder { get; set; }
 
         [ForeignKey("SharedByUserId")]
         public virtual required User SharedByUser { get; set; }

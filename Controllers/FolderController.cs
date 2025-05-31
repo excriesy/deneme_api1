@@ -124,7 +124,7 @@ namespace ShareVault.API.Controllers
         /// </summary>
         /// <param name="folderId">Klasör ID</param>
         /// <returns>İşlem sonucu</returns>
-        [HttpDelete("{folderId}")]
+        [HttpDelete("delete/{folderId}")]
         [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -300,18 +300,148 @@ namespace ShareVault.API.Controllers
                 _ => false
             };
         }
+
+        #region Klasör Paylaşımı Endpoint'leri
+
+        /// <summary>
+        /// Klasörü başka bir kullanıcı ile paylaşır
+        /// </summary>
+        /// <param name="folderId">Paylaşılacak klasör ID</param>
+        /// <param name="request">Paylaşım bilgileri</param>
+        /// <returns>Paylaşım bilgileri</returns>
+        [HttpPost("{folderId}/share")]
+        [ProducesResponseType(typeof(SharedFolderDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> ShareFolder(string folderId, [FromBody] ShareFolderRequest request)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                if (string.IsNullOrEmpty(request.SharedWithUserId))
+                    return BadRequest("Paylaşım yapılacak kullanıcı belirtilmelidir");
+
+                var sharedFolder = await _folderService.ShareFolderAsync(
+                    folderId, 
+                    userId, 
+                    request.SharedWithUserId, 
+                    request.Permission, 
+                    request.ExpiresAt, 
+                    request.ShareNote ?? string.Empty);
+
+                return Ok(sharedFolder);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Klasör paylaşım hatası", ex, userId);
+                return StatusCode(500, "Klasör paylaşılırken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Kullanıcı ile paylaşılan klasörleri listeler
+        /// </summary>
+        /// <returns>Paylaşılan klasör listesi</returns>
+        [HttpGet("shared-with-me")]
+        [ProducesResponseType(typeof(IEnumerable<SharedFolderDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> GetSharedFolders()
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var sharedFolders = await _folderService.GetSharedFoldersAsync(userId);
+                return Ok(sharedFolders);
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Paylaşılan klasörleri listeleme hatası", ex, userId);
+                return StatusCode(500, "Paylaşılan klasörler listelenirken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Klasörün paylaşıldığı kullanıcıları listeler
+        /// </summary>
+        /// <param name="folderId">Klasör ID</param>
+        /// <returns>Klasör paylaşım listesi</returns>
+        [HttpGet("{folderId}/shared-users")]
+        [ProducesResponseType(typeof(IEnumerable<SharedFolderDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> GetFolderShares(string folderId)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var folderShares = await _folderService.GetFolderSharesAsync(folderId, userId);
+                return Ok(folderShares);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Klasör paylaşımlarını listeleme hatası", ex, userId);
+                return StatusCode(500, "Klasör paylaşımları listelenirken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Klasör paylaşımını iptal eder
+        /// </summary>
+        /// <param name="folderId">Klasör ID</param>
+        /// <param name="request">Erişimi iptal edilecek kullanıcı bilgileri</param>
+        /// <returns>İşlem sonucu</returns>
+        [HttpPost("{folderId}/revoke-access")]
+        [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> RevokeFolderAccess(string folderId, [FromBody] RevokeFolderAccessRequest request)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                if (string.IsNullOrEmpty(request.SharedWithUserId))
+                    return BadRequest("Paylaşımı iptal edilecek kullanıcı belirtilmelidir");
+
+                await _folderService.RevokeFolderAccessAsync(folderId, request.SharedWithUserId, userId);
+                return Ok("Klasör erişimi başarıyla iptal edildi");
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Klasör erişimi iptal hatasi", ex, userId);
+                return StatusCode(500, "Klasör erişimi iptal edilirken bir hata oluştu");
+            }
+        }
+
+        #endregion
     }
 
-    public class CreateFolderRequest
-    {
-        [Required]
-        public required string Name { get; set; }
-        public string? ParentFolderId { get; set; }
-    }
-
-    public class RenameFolderRequest
-    {
-        [Required]
-        public required string NewName { get; set; }
-    }
 } 

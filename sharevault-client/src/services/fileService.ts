@@ -12,6 +12,7 @@ export interface FileDto {
     fileType?: string;
     isPreviewable?: boolean;
     folderId?: string | null;
+    isFolder?: boolean;
 }
 
 export interface FileDetailsDto extends FileDto {
@@ -126,8 +127,16 @@ const fileService = {
         return response.data;
     },
 
+    async deleteFolder(folderId: string): Promise<any> {
+        const response = await api.delete(`/folder/delete/${folderId}`);
+        return response.data;
+    },
+
     async shareFile(fileId: string, email: string): Promise<any> {
-        const response = await api.post('/file/share-multiple', { fileId: fileId, userEmails: [email] });
+        const response = await api.post('/file/share-multiple', { 
+            FileId: fileId, 
+            UserEmails: [email] 
+        });
         return response.data;
     },
 

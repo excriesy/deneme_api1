@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Upload, message, Modal, Form, Input, Space, Card, Typography, Progress, Image, Tooltip, Dropdown } from 'antd';
-import { UploadOutlined, DownloadOutlined, ShareAltOutlined, DeleteOutlined, InboxOutlined, FileOutlined, IeOutlined, MoreOutlined } from '@ant-design/icons';
+import { Table, Button, Upload, message, Modal, Form, Input, Space, Card, Typography, Progress, Image, Tooltip, Dropdown, Select } from 'antd';
+import { UploadOutlined, DownloadOutlined, ShareAltOutlined, DeleteOutlined, InboxOutlined, FileOutlined, IeOutlined, MoreOutlined, StopOutlined, TeamOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
-import fileService, { FileDto } from '../services/fileService';
+import fileService, { FileDto as FileServiceDto } from '../services/fileService';
+import folderService from '../services/folderService';
+import userService from '../services/userService';
 import { useAuth } from '../contexts/AuthContext';
+import { PermissionType } from '../types/folderTypes';
 
 const { Title } = Typography;
 const { Dragger } = Upload;
@@ -13,16 +16,32 @@ interface UploadProgressEvent {
     total: number;
 }
 
+interface SharedUser {
+    userId: string;
+    username: string;
+    email: string;
+    sharedAt: string;
+}
+
+// FileServiceDto'yu genişletmek için yeni bir tip tanımlıyoruz
+type ExtendedFileDto = Omit<FileServiceDto, 'folderId'> & {
+    folderId?: string | null;
+    icon?: string;
+    isPreviewable?: boolean;
+    isFolder?: boolean;
+};
+
 const FileManager: React.FC = () => {
-    const [files, setFiles] = useState<FileDto[]>([]);
-    const [sharedFiles, setSharedFiles] = useState<FileDto[]>([]);
+    const [files, setFiles] = useState<ExtendedFileDto[]>([]);
+    const [sharedFiles, setSharedFiles] = useState<ExtendedFileDto[]>([]);
     const [loading, setLoading] = useState(false);
     const [loadingSharedFiles, setLoadingSharedFiles] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [shareModalVisible, setShareModalVisible] = useState(false);
-    const [selectedFileForShare, setSelectedFileForShare] = useState<FileDto | null>(null);
+    const [selectedFileForShare, setSelectedFileForShare] = useState<ExtendedFileDto | null>(null);
+    const [selectedItemForShare, setSelectedItemForShare] = useState<{ id: string, name: string, type: 'file' | 'folder' } | null>(null);
     const [shareForm] = Form.useForm();
     const [previewVisible, setPreviewVisible] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string>('');
@@ -37,19 +56,21 @@ const FileManager: React.FC = () => {
     const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
     const [currentView, setCurrentView] = useState<'myFiles' | 'sharedFiles'>('myFiles');
 
-    // Yeni state'ler: Paylaşım detayları için
+    // Paylaşım detayları için state'ler
     const [sharedUsersModalVisible, setSharedUsersModalVisible] = useState(false);
-    const [selectedFileForSharedUsers, setSelectedFileForSharedUsers] = useState<FileDto | null>(null);
-    const [fileSharedUsers, setFileSharedUsers] = useState<any[]>([]); // Paylaşılan kullanıcı listesi
-    const [loadingSharedUsers, setLoadingSharedUsers] = useState(false); // Paylaşılan kullanıcılar listesi yükleniyor mu?
+    const [selectedFileForSharedUsers, setSelectedFileForSharedUsers] = useState<ExtendedFileDto | null>(null);
+    const [sharedUsers, setSharedUsers] = useState<SharedUser[]>([]);
+    const [loadingSharedUsers, setLoadingSharedUsers] = useState(false);
 
     const [renameModalVisible, setRenameModalVisible] = useState(false);
-    const [selectedFolder, setSelectedFolder] = useState<FileDto | null>(null);
+    const [selectedFolder, setSelectedFolder] = useState<ExtendedFileDto | null>(null);
     const [renameForm] = Form.useForm();
 
     useEffect(() => {
-        loadFiles();
-        loadSharedFiles();
+        if (user) {
+            loadFiles();
+            loadSharedFiles();
+        }
     }, [user]);
 
     useEffect(() => {
@@ -64,7 +85,14 @@ const FileManager: React.FC = () => {
             setLoading(true);
             const fileList = await fileService.getFiles(currentFolderId);
             console.log('loadFiles: File list from backend:', fileList);
-            setFiles(fileList);
+            // FileServiceDto'yu ExtendedFileDto'ya dönüştürme
+            const extendedFiles: ExtendedFileDto[] = fileList.map(file => ({
+                ...file,
+                icon: file.contentType === 'folder' ? '📁' : '📄',
+                isPreviewable: file.contentType.startsWith('image/'),
+                isFolder: file.contentType === 'folder'
+            }));
+            setFiles(extendedFiles);
             console.log('loadFiles: File list state set.');
         } catch (error: any) {
             console.error('Error loading files:', error);
@@ -79,10 +107,41 @@ const FileManager: React.FC = () => {
     const loadSharedFiles = async () => {
         try {
             setLoadingSharedFiles(true);
+            
+            // Paylaşılan dosyaları yükle
             const sharedFileList = await fileService.getSharedFiles();
-            setSharedFiles(sharedFileList);
+            const extendedSharedFiles: ExtendedFileDto[] = sharedFileList.map(file => ({
+                ...file,
+                icon: file.contentType === 'folder' ? '📁' : '📄',
+                isPreviewable: file.contentType.startsWith('image/'),
+                isFolder: file.contentType === 'folder'
+            }));
+            
+            // Paylaşılan klasörleri yükle
+            const sharedFolders = await folderService.getSharedFolders();
+            const extendedSharedFolders: ExtendedFileDto[] = sharedFolders.map(folder => ({
+                id: folder.id,
+                name: folder.name,
+                contentType: 'folder',
+                size: 0,
+                uploadedAt: folder.createdAt || new Date().toISOString(),
+                uploadedBy: folder.createdByUsername || '',
+                userId: folder.createdById || '',
+                folderId: folder.parentFolderId,
+                icon: '📁',
+                isFolder: true
+            }));
+            
+            // Dosya ve klasörleri birleştir
+            setSharedFiles([...extendedSharedFiles, ...extendedSharedFolders]);
+            console.log('Paylaşılan dosya ve klasörler yüklendi:', {
+                dosya: extendedSharedFiles.length,
+                klasör: extendedSharedFolders.length,
+                toplam: extendedSharedFiles.length + extendedSharedFolders.length
+            });
         } catch (error: any) {
-            message.error('Paylaşılan dosyalar yüklenirken bir hata oluştu: ' + error.message);
+            console.error('Paylaşılan öğeler yüklenirken hata:', error);
+            message.error('Paylaşılan dosyalar ve klasörler yüklenirken bir hata oluştu: ' + error.message);
             setSharedFiles([]);
         } finally {
             setLoadingSharedFiles(false);
@@ -128,8 +187,6 @@ const FileManager: React.FC = () => {
         } finally {
             setCancelToken(null);
         }
-        
-        return false;
     };
 
     const handleCompleteUpload = async () => {
@@ -185,14 +242,14 @@ const FileManager: React.FC = () => {
         } catch (error: any) {
             message.error('Dosya indirilirken bir hata oluştu: ' + (error.message || ''));
             if (error.message && (error.message.includes('404') || error.message.includes('Not Found'))) {
-                setFiles(files.filter(f => f.id !== fileId));
+                setFiles(files.filter((file: ExtendedFileDto) => file.id !== fileId));
             }
         }
     };
 
-    const handleDelete = async (fileId: string) => {
+    const handleDelete = async (itemId: string, itemType: 'file' | 'folder') => {
         Modal.confirm({
-            title: 'Dosyayı silmek istediğinize emin misiniz?',
+            title: `${itemType === 'file' ? 'Dosyayı' : 'Klasörü'} silmek istediğinize emin misiniz?`,
             content: 'Bu işlem geri alınamaz.',
             okText: 'Evet',
             okType: 'danger',
@@ -200,11 +257,16 @@ const FileManager: React.FC = () => {
             onOk: async () => {
                 try {
                     setLoading(true);
-                    await fileService.deleteFile(fileId);
-                    message.success('Dosya başarıyla silindi');
+                    if (itemType === 'file') {
+                        await fileService.deleteFile(itemId);
+                        message.success('Dosya başarıyla silindi');
+                    } else {
+                        await folderService.deleteFolder(itemId);
+                        message.success('Klasör başarıyla silindi');
+                    }
                     await loadFiles();
                 } catch (error: any) {
-                    message.error('Dosya silinirken bir hata oluştu: ' + (error.message || ''));
+                    message.error(`${itemType === 'file' ? 'Dosya' : 'Klasör'} silinirken bir hata oluştu: ` + (error.message || ''));
                     await loadFiles();
                 } finally {
                     setLoading(false);
@@ -213,17 +275,75 @@ const FileManager: React.FC = () => {
         });
     };
 
-    const handleShare = async (values: { email: string }) => {
-        if (!selectedFileForShare) return;
+    const handleShare = async (values: { email: string, permission?: string }) => {
+        if (!selectedItemForShare) return;
 
         try {
             setLoading(true);
-            await fileService.shareFile(selectedFileForShare.id, values.email);
-            message.success('Dosya başarıyla paylaşıldı');
+            console.log('Paylaşım başlatılıyor:', selectedItemForShare);
+
+            if (selectedItemForShare.type === 'folder') {
+                // Klasör paylaşımı
+                let permissionType: PermissionType;
+
+                switch (values.permission) {
+                    case 'Read':
+                        permissionType = PermissionType.Read;
+                        break;
+                    case 'Write':
+                        permissionType = PermissionType.Write;
+                        break;
+                    case 'Delete':
+                        permissionType = PermissionType.Delete;
+                        break;
+                    case 'Share':
+                        permissionType = PermissionType.Share;
+                        break;
+                    case 'FullControl':
+                        permissionType = PermissionType.FullControl;
+                        break;
+                    default:
+                        permissionType = PermissionType.Read;
+                        break;
+                }
+
+                try {
+                    // Önce e-posta adresinden kullanıcı ID'sini al
+                    const userInfo = await userService.getUserByEmail(values.email);
+
+                    console.log('Kullanıcı bilgileri alındı:', userInfo);
+                    console.log('Klasör paylaşım bilgileri:', {
+                        folderId: selectedItemForShare.id,
+                        sharedWithUserId: userInfo.id,
+                        permission: permissionType
+                    });
+
+                    // Backend'e kullanıcı ID'si ile paylaşım isteği gönder
+                    await folderService.shareFolder(selectedItemForShare.id, {
+                        sharedWithUserId: userInfo.id,
+                        permission: permissionType
+                    });
+                    message.success('Klasör başarıyla paylaşıldı');
+                } catch (userError: any) {
+                    message.error(`Kullanıcı bulunamadı veya paylaşım işlemi başarısız oldu: ${userError.message}`);
+                    throw userError; // Ana catch bloğuna ilet
+                }
+            } else {
+                // Dosya paylaşımı
+                console.log('Dosya paylaşım bilgileri:', {
+                    FileId: selectedItemForShare.id,
+                    UserEmails: [values.email]
+                });
+
+                await fileService.shareFile(selectedItemForShare.id, values.email);
+                message.success('Dosya başarıyla paylaşıldı');
+            }
+
             setShareModalVisible(false);
-            shareForm.resetFields();
+            setSelectedItemForShare(null);
+
         } catch (error: any) {
-            message.error('Dosya paylaşılırken bir hata oluştu: ' + error.message);
+            message.error(`${selectedItemForShare.type === 'folder' ? 'Klasör' : 'Dosya'} paylaşılırken bir hata oluştu: ${error.message}`);
         } finally {
             setLoading(false);
         }
@@ -238,7 +358,7 @@ const FileManager: React.FC = () => {
     };
 
     const handlePreview = async (fileId: string, fileName: string) => {
-        const fileToPreview = files.find(f => f.id === fileId);
+        const fileToPreview = files.find((f: ExtendedFileDto) => f.id === fileId);
         if (!fileToPreview || !fileToPreview.contentType.startsWith('image/')) {
             message.info('Bu dosya türü için önizleme desteklenmiyor.');
             return;
@@ -259,10 +379,10 @@ const FileManager: React.FC = () => {
         setPreviewUrl('');
     };
 
-    const parentFolderItem = files.find(item => item.id === currentFolderId && item.contentType === 'folder');
+    const parentFolderItem = files.find((item: ExtendedFileDto) => item.id === currentFolderId && item.contentType === 'folder');
     const parentFolderId = parentFolderItem?.folderId;
 
-    const showRenameModal = (record: FileDto) => {
+    const showRenameModal = (record: ExtendedFileDto) => {
         setSelectedFolder(record);
         renameForm.setFieldsValue({ newName: record.name });
         setRenameModalVisible(true);
@@ -286,8 +406,8 @@ const FileManager: React.FC = () => {
             title: 'Dosya Adı',
             dataIndex: 'name',
             key: 'name',
-            render: (text: string, record: FileDto) => (
-                <div 
+            render: (text: string, record: ExtendedFileDto) => (
+                <div
                     style={{ display: 'flex', alignItems: 'center', cursor: record.contentType === 'folder' ? 'pointer' : 'default' }}
                     onClick={() => {
                         if (record.contentType === 'folder') {
@@ -320,10 +440,10 @@ const FileManager: React.FC = () => {
         {
             title: 'İşlemler',
             key: 'actions',
-            render: (_: any, record: FileDto) => (
+            render: (_: any, record: ExtendedFileDto) => (
                 <Space>
                     {record.contentType === 'folder' ? (
-                        <Dropdown
+                        <Dropdown key={`dropdown-${record.id}`}
                             menu={{
                                 items: [
                                     {
@@ -332,10 +452,35 @@ const FileManager: React.FC = () => {
                                         onClick: () => showRenameModal(record)
                                     },
                                     {
+                                        key: 'share',
+                                        label: 'Paylaş',
+                                        icon: <ShareAltOutlined />,
+                                        onClick: () => {
+                                            if (record.userId === user?.id) {
+                                                // record.contentType = 'folder' olduğunu biliyoruz çünkü bu klasör dropdown menüsü
+                                                const folderRecord = { ...record, isFolder: true, contentType: 'folder' };
+                                                console.log('Klasör paylaşımı için handleShareClick çağrılıyor:', folderRecord);
+                                                handleShareClick(folderRecord);
+                                            } else {
+                                                message.info('Bu klasörü paylaşma yetkiniz yok.');
+                                            }
+                                        }
+                                    },
+                                    {
+                                        key: 'shared-users',
+                                        label: 'Paylaşım Detayları',
+                                        icon: <TeamOutlined />,
+                                        onClick: () => {
+                                            console.log('Klasör paylaşım detayları görüntüleniyor:', record.id, record.name);
+                                            // isFolder = true ile çağrı yapıyoruz
+                                            handleViewSharedUsers(record.id, record.name, true);
+                                        }
+                                    },
+                                    {
                                         key: 'delete',
                                         label: 'Sil',
                                         danger: true,
-                                        onClick: () => handleDelete(record.id)
+                                        onClick: () => handleDelete(record.id, record.contentType === 'folder' ? 'folder' : 'file')
                                     }
                                 ]
                             }}
@@ -364,7 +509,7 @@ const FileManager: React.FC = () => {
                                 <Tooltip title="Sil">
                                     <Button
                                         icon={<DeleteOutlined />}
-                                        onClick={() => handleDelete(record.id)}
+                                        onClick={() => handleDelete(record.id, 'file')}
                                         type="text"
                                         danger
                                     />
@@ -383,6 +528,15 @@ const FileManager: React.FC = () => {
                                     type="text"
                                 />
                             </Tooltip>
+                            {record.userId === user?.id && record.contentType !== 'folder' && (
+                                <Tooltip title="Paylaşım Detayları">
+                                    <Button
+                                        icon={<TeamOutlined />}
+                                        onClick={() => handleViewSharedUsers(record.id, record.name, record.contentType === 'folder')}
+                                        type="text"
+                                    />
+                                </Tooltip>
+                            )}
                         </>
                     )}
                 </Space>
@@ -395,7 +549,7 @@ const FileManager: React.FC = () => {
             title: 'Dosya Adı',
             dataIndex: 'name',
             key: 'name',
-            render: (text: string, record: FileDto) => (
+            render: (text: string, record: ExtendedFileDto) => (
                 <div style={{ display: 'flex', alignItems: 'center' }}>
                     <span style={{ fontSize: '18px', marginRight: 8 }}>{record.icon || '📄'}</span>
                     <span>{text}</span>
@@ -422,7 +576,7 @@ const FileManager: React.FC = () => {
         {
             title: 'İşlemler',
             key: 'actions',
-            render: (_: any, record: FileDto) => (
+            render: (_: any, record: ExtendedFileDto) => (
                 <Space>
                     {record.contentType.startsWith('image/') && (record.isPreviewable ?? true) && (
                         <Tooltip title="Önizle">
@@ -440,21 +594,32 @@ const FileManager: React.FC = () => {
                             type="text"
                         />
                     </Tooltip>
-                     <Tooltip title="Paylaşım Detayları">
-                         <Button
-                             icon={<FileOutlined />}
-                             onClick={() => {
+                    <Tooltip title="Paylaşım Detayları">
+                        <Button
+                            icon={<FileOutlined />}
+                            onClick={() => {
                                 if (record.userId === user?.id) {
                                     // Kendi dosyanızsa paylaşım detaylarını göster
-                                    handleViewSharedUsers(record.id, record.name);
+                                    handleViewSharedUsers(record.id, record.name, record.contentType === 'folder');
                                 } else {
                                     // Başkasının sizinle paylaştığı dosyaysa yetki uyarısı ver
                                     message.info('Bu dosyanın paylaşım detaylarını görme yetkiniz yok.');
                                 }
                             }}
-                             type="text"
-                         />
+                            type="text"
+                        />
                     </Tooltip>
+                    {/* Kullanıcı kendisiyle paylaşılan bir dosyaya erişimini iptal edebilir */}
+                    {currentView === 'sharedFiles' && (
+                        <Tooltip title="Erişimimi İptal Et">
+                            <Button
+                                icon={<StopOutlined />}
+                                onClick={() => handleRemoveMyAccess(record.id, user?.id || '')}
+                                type="text"
+                                danger
+                            />
+                        </Tooltip>
+                    )}
                 </Space>
             ),
         },
@@ -506,62 +671,188 @@ const FileManager: React.FC = () => {
 
     const rowSelection = {
         selectedRowKeys,
-        onChange: (newSelectedRowKeys: React.Key[], selectedRows: FileDto[]) => {
+        onChange: (newSelectedRowKeys: React.Key[], selectedRows: ExtendedFileDto[]) => {
             setSelectedRowKeys(newSelectedRowKeys.map(key => key.toString()));
         },
     };
 
-    const filteredFiles = files.filter(file => 
+    const filteredFiles = files.filter((file: ExtendedFileDto) =>
         file.name.toLowerCase().includes(searchText.toLowerCase())
     );
 
-    // Yeni fonksiyon: Paylaşılan kullanıcıları görmek için
-    const handleViewSharedUsers = async (fileId: string, fileName: string) => {
-        setSelectedFileForSharedUsers({ id: fileId, name: fileName } as FileDto); // Sadece gerekli bilgileri set et
-        setSharedUsersModalVisible(true);
-        setLoadingSharedUsers(true);
+    // Paylaşılan kullanıcıları görüntülemek için
+    const handleViewSharedUsers = async (itemId: string, itemName: string, isFolder: boolean) => {
         try {
-            // Backend'den paylaşılan kullanıcıları çekecek fileService metodu çağrılacak
-            const sharedUsersList = await fileService.getSharedUsers(fileId);
-            console.log('API yanıtı tamamı:', sharedUsersList); // Yeni log
-            console.log('API yanıtındaki sharedUsers:', sharedUsersList.sharedUsers); // sharedUsers küçük harf yapıldı
-            setFileSharedUsers(sharedUsersList.sharedUsers); // sharedUsers küçük harf yapıldı
+            console.log('Paylaşılan kullanıcıları görüntüleme isteği:', { itemId, itemName, isFolder });
+            
+            setSelectedFileForSharedUsers({
+                id: itemId,
+                name: itemName,
+                isFolder: isFolder,
+                // Diğer alanlar için varsayılan değerler
+                contentType: '',
+                size: 0,
+                uploadedAt: '',
+                uploadedBy: '',
+                userId: ''
+            });
+            
+            setLoadingSharedUsers(true);
+            setSharedUsersModalVisible(true);
+            
+            try {
+                let users;
+                if (isFolder) {
+                    users = await folderService.getSharedUsers(itemId);
+                    console.log('Klasör için paylaşılan kullanıcılar API yanıtı:', users);
+                } else {
+                    const response = await fileService.getSharedUsers(itemId);
+                    console.log('Dosya için paylaşılan kullanıcılar API yanıtı:', response);
+                    users = response.sharedUsers || [];
+                }
+                
+                console.log('İşlenmiş paylaşılan kullanıcılar:', users);
+                
+                if (Array.isArray(users)) {
+                    setSharedUsers(users);
+                } else {
+                    console.error('Beklenmeyen API yanıtı:', users);
+                    setSharedUsers([]);
+                    message.error('Paylaşılan kullanıcılar alınırken bir hata oluştu');
+                }
+            } catch (error: any) {
+                console.error('Paylaşılan kullanıcılar alınırken hata:', error);
+                setSharedUsers([]);
+                message.error(`Paylaşılan kullanıcılar alınırken bir hata oluştu: ${error.message}`);
+            } finally {
+                setLoadingSharedUsers(false);
+            }
         } catch (error: any) {
-            message.error('Paylaşım detayları yüklenirken bir hata oluştu: ' + error.message);
-            setFileSharedUsers([]);
-        } finally {
-            setLoadingSharedUsers(false);
+            console.error('Paylaşılan kullanıcıları görüntüleme işlemi başlatılırken hata:', error);
+            message.error(`İşlem başlatılamadı: ${error.message}`);
         }
     };
 
     // fileSharedUsers state'i değiştiğinde konsola yazdırmak için useEffect ekledim
     useEffect(() => {
-        console.log('fileSharedUsers state güncellendi:', fileSharedUsers);
-    }, [fileSharedUsers]);
+        console.log('sharedUsers state güncellendi:', sharedUsers);
+    }, [sharedUsers]);
 
-    // Yeni fonksiyon: Paylaşım erişimini kaldırmak için
-    const handleRevokeAccess = async (fileId: string, sharedWithUserId: string) => {
-         Modal.confirm({
-            title: 'Paylaşım Erişimini Kaldır',
-            content: 'Bu kullanıcının dosyaya erişimini kaldırmak istediğinize emin misiniz?',
-            okText: 'Evet',
-            okType: 'danger',
-            cancelText: 'Hayır',
-            onOk: async () => {
-                 try {
-                    console.log('Erişim kaldırma isteği gönderiliyor. File ID:', fileId, 'Shared With User ID:', sharedWithUserId); // Log ekledim
-                    // Backend'e erişimi kaldırma isteği gönderecek fileService metodu çağrılacak
-                    await fileService.revokeAccess(fileId, sharedWithUserId);
-                    message.success('Erişim başarıyla kaldırıldı.');
-                    // Modalı yeniden yükleyerek listeyi güncelle
-                    if(selectedFileForSharedUsers) {
-                        handleViewSharedUsers(selectedFileForSharedUsers.id, selectedFileForSharedUsers.name);
-                    }
-                 } catch (error: any) {
-                     message.error('Erişim kaldırılırken bir hata oluştu: ' + error.message);
-                 }
+    // Kullanıcının kendisine paylaşılan bir dosya/klasöre erişimini iptal etmesi için
+    const handleRemoveMyAccess = async (itemId: string, userId: string) => {
+        try {
+            // Paylaşılan dosya/klasörü bul
+            const item = sharedFiles.find(item => item.id === itemId);
+            if (!item) {
+                message.error('Dosya/klasör bulunamadı');
+                return;
             }
-         });
+
+            const isFolder = item.contentType === 'folder' || item.isFolder === true;
+            const itemTypeText = isFolder ? 'klasöre' : 'dosyaya';
+
+            Modal.confirm({
+                title: 'Erişimi İptal Et',
+                content: `Bu ${itemTypeText} erişiminizi iptal etmek istediğinizden emin misiniz?`,
+                okText: 'Evet',
+                okType: 'danger',
+                cancelText: 'Hayır',
+                onOk: async () => {
+                    try {
+                        setLoading(true);
+                        
+                        if (isFolder) {
+                            // Klasör erişimini iptal et
+                            await folderService.revokeAccess(itemId, userId);
+                        } else {
+                            // Dosya erişimini iptal et
+                            await fileService.revokeAccess(itemId, userId);
+                        }
+                        
+                        message.success(`${isFolder ? 'Klasör' : 'Dosya'} erişiminiz başarıyla iptal edildi`);
+                        
+                        // Paylaşılan dosya/klasör listesini güncelle
+                        await loadSharedFiles();
+                    } catch (error: any) {
+                        console.error('Erişim iptali sırasında hata:', error);
+                        message.error('Erişim iptali sırasında bir hata oluştu: ' + error.message);
+                    } finally {
+                        setLoading(false);
+                    }
+                }
+            });
+        } catch (error: any) {
+            console.error('Erişim iptali işlemi sırasında hata:', error);
+            message.error('Erişim iptali işlemi sırasında bir hata oluştu: ' + error.message);
+        }
+    };
+
+    // Paylaşım erişimini kaldırmak için (dosya/klasör sahibi başkalarının erişimini kaldırır)
+    const handleRevokeAccess = async (folderId: string, userId: string) => {
+        try {
+            console.log('Erişim iptali isteği:', { itemId: folderId, sharedWithUserId: userId });
+            
+            if (!selectedFileForSharedUsers) {
+                console.error('handleRevokeAccess: Seçili dosya/klasör bulunamadı');
+                message.error('Erişim iptali için seçili dosya/klasör bilgisi eksik');
+                return;
+            }
+            
+            // Konsolda görülen verilere göre, backend'e gönderilen record ID'sini kontrol edelim
+            console.log('Seçilen klasör/dosya:', selectedFileForSharedUsers);
+            
+            Modal.confirm({
+                title: 'Erişimi İptal Et',
+                content: 'Bu kullanıcının erişimini iptal etmek istediğinizden emin misiniz?',
+                okText: 'Evet',
+                okType: 'danger',
+                cancelText: 'Hayır',
+                onOk: async () => {
+                    try {
+                        setLoadingSharedUsers(true);
+                        
+                        // isFolder değerine göre doğru servisi çağır
+                        if (selectedFileForSharedUsers?.isFolder) {
+                            console.log('Klasör erişimi iptal ediliyor. FolderId:', folderId, 'SharedWithUserId:', userId);
+                            await folderService.revokeAccess(folderId, userId);
+                        } else {
+                            console.log('Dosya erişimi iptal ediliyor. FileId:', folderId, 'SharedWithUserId:', userId);
+                            await fileService.revokeAccess(folderId, userId);
+                        }
+                        
+                        message.success('Erişim başarıyla iptal edildi');
+                        
+                        // Paylaşım listesini güncelle
+                        if (selectedFileForSharedUsers) {
+                            await handleViewSharedUsers(
+                                selectedFileForSharedUsers.id,
+                                selectedFileForSharedUsers.name,
+                                selectedFileForSharedUsers.isFolder || false
+                            );
+                        }
+                        
+                        // Paylaşılan dosyalar/klasörler listesini güncelle
+                        if (currentView === 'sharedFiles') {
+                            await loadSharedFiles();
+                        }
+                    } catch (error: any) {
+                        console.error('Paylaşım erişimi kaldırılırken hata:', error);
+                        
+                        // Hata mesajını kullanıcıya göster
+                        if (error.response?.status === 404) {
+                            message.error('Aktif paylaşım bulunamadı. Kullanıcı ile klasör arasında aktif bir paylaşım olmayabilir.');
+                        } else {
+                            message.error(`Erişim iptal edilirken bir hata oluştu: ${error.message}`);
+                        }
+                    } finally {
+                        setLoadingSharedUsers(false);
+                    }
+                }
+            });
+        } catch (error: any) {
+            console.error('Erişim iptali işlemi başlatılırken hata:', error);
+            message.error(`Erişim iptal işlemi başlatılamadı: ${error.message}`);
+        }
     };
 
     const handleRenameFolder = async (folderId: string, newName: string) => {
@@ -577,8 +868,23 @@ const FileManager: React.FC = () => {
         }
     };
 
-    const handleShareClick = (file: FileDto) => {
-        setSelectedFileForShare(file);
+    const handleShareClick = (item: ExtendedFileDto) => {
+        console.log('handleShareClick called with item:', item);
+        // contentType veya isFolder alanını kontrol ederek klasör mü dosya mı olduğunu belirle
+        const isFolder = item.contentType === 'folder' || item.isFolder === true;
+
+        setSelectedItemForShare({
+            id: item.id,
+            name: item.name,
+            type: isFolder ? 'folder' : 'file'
+        });
+        
+        console.log('selectedItemForShare set to:', {
+            id: item.id,
+            name: item.name,
+            type: isFolder ? 'folder' : 'file'
+        });
+        
         setShareModalVisible(true);
     };
 
@@ -647,7 +953,7 @@ const FileManager: React.FC = () => {
 
                 {selectedFile && (
                     <div style={{ marginTop: 16 }}>
-                        <Space direction="vertical" style={{ width: '100%' }}>
+                        <Space key="upload-space" direction="vertical" style={{ width: '100%' }}>
                             <div>
                                 <p>Yüklenen dosya: {selectedFile.name}</p>
                                 <p>Boyut: {formatFileSize(selectedFile.size)}</p>
@@ -670,7 +976,7 @@ const FileManager: React.FC = () => {
                             />
                             
                             {!uploading ? (
-                                <Space>
+                                <Space key="upload-buttons">
                                     <Button
                                         type="primary"
                                         onClick={handleCompleteUpload}
@@ -727,26 +1033,47 @@ const FileManager: React.FC = () => {
             )}
 
             <Modal
-                title={`${selectedFileForShare?.name} Dosyasını Paylaş`}
+                title={`"${selectedItemForShare?.name}" ${selectedItemForShare?.type === 'folder' ? 'Klasörünü' : 'Dosyasını'} Paylaş`}
                 open={shareModalVisible}
                 onCancel={() => {
                     setShareModalVisible(false);
-                    setSelectedFileForShare(null);
                     shareForm.resetFields();
+                    setSelectedItemForShare(null);
                 }}
                 footer={null}
             >
-                <Form form={shareForm} onFinish={handleShare}>
+                <Form
+                    form={shareForm}
+                    layout="vertical"
+                    onFinish={handleShare}
+                >
                     <Form.Item
                         name="email"
-                        label="E-posta"
+                        label="Kullanıcı E-postası"
                         rules={[
-                            { required: true, message: 'Lütfen e-posta adresini girin!' },
+                            { required: true, message: 'Lütfen bir e-posta adresi girin!' },
                             { type: 'email', message: 'Geçerli bir e-posta adresi girin!' }
                         ]}
                     >
-                        <Input placeholder="Paylaşılacak kullanıcının e-posta adresi" />
+                        <Input placeholder="Paylaşılacak kullanıcının e-postası" />
                     </Form.Item>
+                    
+                    {selectedItemForShare?.type === 'folder' && (
+                        <Form.Item
+                            name="permission"
+                            label="İzin Türü"
+                            initialValue="Read"
+                        >
+                            <Select>
+                                <Select.Option value="Read">Okuma</Select.Option>
+                                <Select.Option value="Write">Yazma</Select.Option>
+                                <Select.Option value="Delete">Silme</Select.Option>
+                                <Select.Option value="Share">Paylaşım</Select.Option>
+                                <Select.Option value="FullControl">Tam Kontrol</Select.Option>
+                            </Select>
+                        </Form.Item>
+                    )}
+                    
                     <Form.Item>
                         <Space>
                             <Button type="primary" htmlType="submit" loading={loading}>
@@ -754,8 +1081,8 @@ const FileManager: React.FC = () => {
                             </Button>
                             <Button onClick={() => {
                                 setShareModalVisible(false);
-                                setSelectedFileForShare(null);
                                 shareForm.resetFields();
+                                setSelectedItemForShare(null);
                             }}>
                                 İptal
                             </Button>
@@ -811,44 +1138,179 @@ const FileManager: React.FC = () => {
 
             {/* Paylaşılan Kullanıcılar Modalı */}
             <Modal
-                title={`${selectedFileForSharedUsers?.name} Paylaşıldığı Kişiler`}
+                title={`"${selectedFileForSharedUsers?.name}" ${selectedFileForSharedUsers?.isFolder ? 'Klasörünün' : 'Dosyasının'} Paylaşıldığı Kişiler`}
                 open={sharedUsersModalVisible}
                 onCancel={() => {
                     setSharedUsersModalVisible(false);
                     setSelectedFileForSharedUsers(null);
-                    setFileSharedUsers([]); // Modalı kapatırken listeyi temizle
+                    setSharedUsers([]); // Modalı kapatırken listeyi temizle
                 }}
                 footer={null} // Footer istemiyorsak null
                 width={600}
             >
-                 <Table
-                    columns={[
-                        { title: 'Kullanıcı Adı', dataIndex: 'username', key: 'username' },
-                        { title: 'E-posta', dataIndex: 'email', key: 'email' },
-                        { title: 'Paylaşım Tarihi', dataIndex: 'sharedAt', key: 'sharedAt', render: (date: string) => new Date(date).toLocaleString('tr-TR') },
-                        {
-                            title: 'İşlemler',
-                            key: 'actions',
-                            render: (_: any, record: any) => (
-                                 <Button
-                                     danger
-                                     onClick={() => handleRevokeAccess(selectedFileForSharedUsers!.id, record.userId)}
-                                 >
-                                     Erişimi Kaldır
-                                 </Button>
-                            ),
-                        },
-                    ]}
-                    dataSource={fileSharedUsers}
-                    rowKey="userId"
-                    loading={loadingSharedUsers}
-                    pagination={false} // Paylaşılan kullanıcı sayısı az olacağı varsayımıyla sayfalama yok
-                    locale={{
-                        emptyText: 'Bu dosya henüz kimseyle paylaşılmamış.'
-                    }}
-                 />
+                {sharedUsers && sharedUsers.length > 0 ? (
+                    <Table
+                        columns={[
+                            { 
+                                title: 'Kullanıcı Adı', 
+                                dataIndex: 'sharedWithUserName', 
+                                key: 'username', 
+                                render: (text: string, record: any) => {
+                                    // Veri modeli refaktörü sonrası farklı alanları kontrol et
+                                    // Öncelik sırası: sharedWithUserName > username > name
+                                    const userName = record.sharedWithUserName || 
+                                                    record.username || 
+                                                    record.name ||
+                                                    'Bilinmeyen Kullanıcı';
+                                    
+                                    // Kullanıcı ID'si için tüm olası alanları kontrol et
+                                    const userId = record.sharedWithUserId || record.userId || (record as any).id || Math.random();
+                                    
+                                    return <span key={`username-${userId}`}>{userName}</span>;
+                                }
+                            },
+                            { 
+                                title: 'E-posta', 
+                                dataIndex: 'sharedWithUserEmail', 
+                                key: 'email', 
+                                render: (text: string, record: any) => {
+                                    // Veri modeli refaktörü sonrası farklı alanları kontrol et
+                                    // Öncelik sırası: sharedWithUserEmail > email
+                                    const email = record.sharedWithUserEmail || 
+                                                 record.email || 
+                                                 '';
+                                    
+                                    // Kullanıcı ID'si için tüm olası alanları kontrol et
+                                    const userId = record.sharedWithUserId || record.userId || (record as any).id || Math.random();
+                                    
+                                    return <span key={`email-${userId}`}>{email}</span>;
+                                }
+                            },
+                            { 
+                                title: 'Paylaşım Tarihi', 
+                                dataIndex: 'sharedAt', 
+                                key: 'sharedAt', 
+                                render: (date: string, record: any) => {
+                                    const dateStr = date ? new Date(date).toLocaleString('tr-TR') : 'Belirtilmemiş';
+                                    return <span key={`date-${record.sharedWithUserId || Math.random()}`}>{dateStr}</span>;
+                                }
+                            },
+                            {
+                                title: 'İşlemler',
+                                key: 'actions',
+                                render: (_, record) => {
+                                    // Debug log kullanıcı bilgilerini göster
+                                    // Tüm olasi kullanıcı ID alanlarını inceleyelim
+                                    console.log('Render edilen kullanıcı:', record);
+                                    
+                                    // Record içindeki tüm ID benzeri alanları loglayarak kontrol edelim
+                                    const allFields = Object.keys(record).filter(key => 
+                                        key.toLowerCase().includes('id') || 
+                                        key.toLowerCase().includes('user')
+                                    );
+                                    
+                                    console.log('Olası ID alanları:', allFields.map(field => ({
+                                        field,
+                                        value: (record as any)[field]
+                                    })));
+                                    
+                                    // Kullanıcı veri modeli
+                                    // Backend'den gelen veri ile en iyi eşleşen alanı bulmaya çalışıyoruz
+                                    
+                                    // Öncelik sırası ile kullanıcı ID alanlarını kontrol edelim
+                                    // GUID kontrolü için regex - bu doğru kullanıcı ID'sini bulmamıza yardımcı olacak
+                                    const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                                    
+                                    // Önce doğrudan backend model alanlarını kontrol edelim
+                                    let userId = (record as any).sharedWithUserId;
+                                    if (userId) {
+                                        console.log('sharedWithUserId alanı bulundu:', userId);
+                                    }
+                                    
+                                    // Eğer bu alanlarda kullanıcı ID bulunamadıysa, alternatif alanlara bakalım
+                                    if (!userId || !guidRegex.test(userId)) {
+                                        // Record nesnesi içindeki id alanı
+                                        if ((record as any).id && guidRegex.test((record as any).id)) {
+                                            userId = (record as any).id;
+                                            console.log('ID alanı kullanıldı:', userId);
+                                        }
+                                        // userId alanı
+                                        else if ((record as any).userId && guidRegex.test((record as any).userId)) {
+                                            userId = (record as any).userId;
+                                            console.log('userId alanı kullanıldı:', userId);
+                                        }
+                                        // SharedWithUserId alanı (büyük harfle başlayan)
+                                        else if ((record as any).SharedWithUserId && guidRegex.test((record as any).SharedWithUserId)) {
+                                            userId = (record as any).SharedWithUserId;
+                                            console.log('SharedWithUserId alanı kullanıldı:', userId);
+                                        }
+                                    }
+                                    
+                                    console.log('Tespit edilen kullanıcı ID:', userId);
+                                    
+                                    return (
+                                        <Button
+                                            key={`revoke-${userId}`}
+                                            type="primary"
+                                            danger
+                                            icon={<StopOutlined />}
+                                            onClick={() => {
+                                                // Veri modeli refaktörü sonrası backend DTO'larındaki alan adlarını kullanmalıyız
+                                                // Öncelikle sharedWithUserId alanını kontrol edelim, yoksa diğer alanlara bakalım
+                                                const sharedWithUserId = (record as any).sharedWithUserId || 
+                                                                      (record as any).userId || 
+                                                                      userId; // Son çare olarak render fonksiyonuna gelen userId'yi kullan
+                                                
+                                                console.log('Erişim iptal edilecek kullanıcı kaydı:', record);
+                                                console.log('Tespit edilen kullanıcı ID:', sharedWithUserId);
+                                                
+                                                // Kullanıcı ID'si bulunamadıysa hata göster
+                                                if (!sharedWithUserId) {
+                                                    message.error('Kullanıcı ID bilgisi bulunamadı');
+                                                    console.error('Geçersiz veri formatı. Kullanıcı kaydı:', JSON.stringify(record));
+                                                    return;
+                                                }
+                                                
+                                                // Klasör ID'si ve Paylaşılan Kullanıcı ID'si doğru bir şekilde gönderiliyor
+                                                const itemId = selectedFileForSharedUsers!.id;
+                                                console.log('Erişim iptali için gönderilen bilgiler:', { 
+                                                    itemId, 
+                                                    sharedWithUserId,
+                                                    isFolder: selectedFileForSharedUsers!.isFolder
+                                                });
+                                                
+                                                // Doğru parametre sırasıyla çağrı yapılıyor
+                                                handleRevokeAccess(itemId, sharedWithUserId);
+                                            }}
+                                        >
+                                            Erişimi İptal Et
+                                        </Button>
+                                    );
+                                },
+                            }
+                        ]}
+                        dataSource={sharedUsers}
+                        rowKey={(record) => {
+                            // Öncelikle sharedWithUserId, sonra userId, sonra id alanlarını kontrol et
+                            return (record as any).sharedWithUserId || 
+                                   (record as any).userId || 
+                                   (record as any).id || 
+                                   Math.random().toString(); // Son çare olarak rastgele bir değer kullan
+                        }}
+                        loading={loadingSharedUsers}
+                        pagination={false}
+                    />
+                ) : (
+                    <div style={{ textAlign: 'center', padding: '20px' }}>
+                        {loadingSharedUsers ? (
+                            <p>Yükleniyor...</p>
+                        ) : (
+                            <p>Bu dosya henüz kimseyle paylaşılmamış.</p>
+                        )}
+                    </div>
+                )}
             </Modal>
-
+            
             <Modal
                 title="Klasörü Yeniden Adlandır"
                 open={renameModalVisible}
@@ -873,4 +1335,4 @@ const FileManager: React.FC = () => {
     );
 };
 
-export default FileManager; 
+export default FileManager;

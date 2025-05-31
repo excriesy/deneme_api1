@@ -129,44 +129,99 @@ namespace ShareVault.API.Services
         {
             try
             {
-                // Check cache first
+                await _logService.LogInfoAsync($"Dosya indirme talebi başlatıldı. FileID: {fileId}, UserID: {userId}", userId);
+                
+                // Önce önbellekten kontrol et
                 var cachedFile = _cacheService.Get<byte[]>($"file_content_{fileId}");
                 if (cachedFile != null)
                 {
+                    await _logService.LogInfoAsync($"Dosya önbellekten getirildi. FileID: {fileId}", userId);
                     await _logService.LogRequestAsync("GET", $"/api/file/download/{fileId}", 200, userId);
                     return cachedFile;
                 }
 
+                // Veritabanından dosya bilgilerini al
                 var file = await _context.Files
                     .FirstOrDefaultAsync(f => f.Id == fileId);
 
                 if (file == null)
-                    throw new KeyNotFoundException("File not found");
+                {
+                    await _logService.LogErrorAsync($"Dosya veritabanında bulunamadı. FileID: {fileId}", new KeyNotFoundException("Dosya bulunamadı"), userId);
+                    throw new KeyNotFoundException("Dosya bulunamadı");
+                }
+                
+                // Silinmiş dosyaları kontrol et (soft-delete)
+                if (file.IsDeleted)
+                {
+                    await _logService.LogErrorAsync($"Dosya silinmiş. FileID: {fileId}", new KeyNotFoundException("Dosya silinmiş veya arşivlenmiş"), userId);
+                    throw new KeyNotFoundException("Dosya silinmiş veya arşivlenmiş");
+                }
 
+                // Erişim izni kontrolü
                 if (file.UserId != userId && !file.IsPublic)
                 {
                     var hasAccess = await _context.SharedFiles
                         .AnyAsync(sf => sf.FileId == fileId && sf.SharedWithUserId == userId && sf.IsActive);
 
                     if (!hasAccess)
+                    {
+                        await _logService.LogErrorAsync($"Yetkisiz erişim girişimi. FileID: {fileId}, UserID: {userId}", 
+                            new UnauthorizedAccessException("Bu dosyaya erişim izniniz yok"), userId);
                         throw new UnauthorizedAccessException("Bu dosyaya erişim izniniz yok");
+                    }
                 }
 
-                var filePath = Path.Combine(_uploadPath, fileId + Path.GetExtension(file.Name));
+                // Dosya adını güvenli bir şekilde oluştur
+                string fileName = fileId;
+                string filePath;
+                
+                if (!string.IsNullOrEmpty(file.Path))
+                {
+                    // Dosya Path alanında tam yol saklanıyorsa onu kullan
+                    filePath = file.Path;
+                    await _logService.LogInfoAsync($"Dosya yolu doğrudan alındı: {filePath}", userId);
+                }
+                else
+                {
+                    // Dosya yolunu oluştur
+                    var extension = Path.GetExtension(file.Name);
+                    fileName = fileId + extension;
+                    filePath = Path.Combine(_uploadPath, fileName);
+                    await _logService.LogInfoAsync($"Dosya yolu oluşturuldu: {filePath}", userId);
+                }
+
+                // Dosyanın fiziksel varlığını kontrol et
                 if (!System.IO.File.Exists(filePath))
-                    throw new FileNotFoundException("File not found on disk");
+                {
+                    // Alternatif yol dene (ID'yi doğrudan dosya adı olarak kullan)
+                    var alternatifYol = Path.Combine(_uploadPath, fileId);
+                    if (System.IO.File.Exists(alternatifYol))
+                    {
+                        filePath = alternatifYol;
+                        await _logService.LogInfoAsync($"Dosya alternatif yolda bulundu: {filePath}", userId);
+                    }
+                    else
+                    {
+                        await _logService.LogErrorAsync($"Dosya fiziksel olarak bulunamadı. Aranan yol: {filePath}, Alternatif yol: {alternatifYol}", 
+                            new FileNotFoundException("Dosya disk üzerinde bulunamadı"), userId);
+                        throw new FileNotFoundException("Dosya disk üzerinde bulunamadı");
+                    }
+                }
 
+                // Dosyayı oku
                 var fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
+                await _logService.LogInfoAsync($"Dosya başarıyla okundu. Boyut: {fileBytes.Length} bayt", userId);
 
-                // Cache the file content
+                // Önbelleğe al
                 _cacheService.Set($"file_content_{fileId}", fileBytes, TimeSpan.FromMinutes(5));
+                await _logService.LogInfoAsync($"Dosya önbelleğe alındı. FileID: {fileId}", userId);
 
                 await _logService.LogRequestAsync("GET", $"/api/file/download/{fileId}", 200, userId);
                 return fileBytes;
             }
             catch (Exception ex)
             {
-                await _logService.LogErrorAsync($"Error downloading file: {fileId}", ex, userId);
+                await _logService.LogErrorAsync($"Dosya indirme hatası: {ex.Message}, FileID: {fileId}", ex, userId);
                 throw;
             }
         }

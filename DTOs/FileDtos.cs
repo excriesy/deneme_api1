@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ShareVault.API.Models;
 
 namespace ShareVault.API.DTOs
 {
@@ -15,6 +16,10 @@ namespace ShareVault.API.DTOs
         public string? FileType { get; set; }
         public bool IsPreviewable { get; set; }
         public string? FolderId { get; set; }
+        public string? Tags { get; set; }
+        public string? Description { get; set; }
+        public bool IsDeleted { get; set; }
+        public int VersionCount { get; set; }
     }
 
     public class FileDetailsDto : FileDto
@@ -22,6 +27,23 @@ namespace ShareVault.API.DTOs
         public required string Path { get; set; }
         public required bool IsPublic { get; set; }
         public DateTime? ExpiresAt { get; set; }
+        public bool IsEncrypted { get; set; }
+        public string? EncryptionMethod { get; set; }
+        public DateTime? DeletedAt { get; set; }
+        public string? DeletedBy { get; set; }
+        public string? MetadataText { get; set; }
+    }
+    
+    public class FileVersionDto
+    {
+        public required string Id { get; set; }
+        public required string FileId { get; set; }
+        public required string VersionNumber { get; set; }
+        public required long Size { get; set; }
+        public required DateTime CreatedAt { get; set; }
+        public required string UserId { get; set; }
+        public string? UserName { get; set; }
+        public string? ChangeNotes { get; set; }
     }
 
     public class SharedFileDto
@@ -31,7 +53,10 @@ namespace ShareVault.API.DTOs
         public required string SharedWithUserId { get; set; }
         public required DateTime SharedAt { get; set; }
         public DateTime? ExpiresAt { get; set; }
-        public required bool CanEdit { get; set; }
+        public PermissionType Permission { get; set; }
+        public string? ShareNote { get; set; }
+        public DateTime? LastAccessedAt { get; set; }
+        public int AccessCount { get; set; }
     }
 
     public class CompleteUploadRequest
