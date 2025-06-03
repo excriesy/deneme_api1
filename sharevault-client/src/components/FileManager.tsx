@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Upload, message, Modal, Form, Input, Space, Card, Typography, Progress, Image, Tooltip, Dropdown, Select } from 'antd';
-import { UploadOutlined, DownloadOutlined, ShareAltOutlined, DeleteOutlined, InboxOutlined, FileOutlined, IeOutlined, MoreOutlined, StopOutlined, TeamOutlined } from '@ant-design/icons';
+import { Table, Button, Upload, message, Modal, Form, Input, Space, Card, Typography, Progress, Image, Tooltip, Dropdown, Select, Badge } from 'antd';
+import { UploadOutlined, DownloadOutlined, ShareAltOutlined, DeleteOutlined, InboxOutlined, FileOutlined, IeOutlined, MoreOutlined, StopOutlined, TeamOutlined, HistoryOutlined } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
-import fileService, { FileDto as FileServiceDto } from '../services/fileService';
+import fileService, { FileDto as FileServiceDto, FileVersionDto } from '../services/fileService';
 import folderService from '../services/folderService';
 import userService from '../services/userService';
 import { useAuth } from '../contexts/AuthContext';
@@ -65,6 +65,11 @@ const FileManager: React.FC = () => {
     const [renameModalVisible, setRenameModalVisible] = useState(false);
     const [selectedFolder, setSelectedFolder] = useState<ExtendedFileDto | null>(null);
     const [renameForm] = Form.useForm();
+
+    const [versionsModalVisible, setVersionsModalVisible] = useState(false);
+    const [selectedFileForVersions, setSelectedFileForVersions] = useState<ExtendedFileDto | null>(null);
+    const [fileVersions, setFileVersions] = useState<FileVersionDto[]>([]);
+    const [loadingVersions, setLoadingVersions] = useState(false);
 
     useEffect(() => {
         if (user) {
@@ -401,23 +406,51 @@ const FileManager: React.FC = () => {
         }
     };
 
+    const handleViewVersions = async (file: ExtendedFileDto) => {
+        try {
+            setSelectedFileForVersions(file);
+            setLoadingVersions(true);
+            const versions = await fileService.getFileVersions(file.id);
+            console.log('Dosya versiyonları:', versions);
+            setFileVersions(versions);
+            setVersionsModalVisible(true);
+        } catch (error: any) {
+            message.error('Versiyonlar yüklenirken bir hata oluştu: ' + error.message);
+        } finally {
+            setLoadingVersions(false);
+        }
+    };
+
+    const handleDownloadVersion = async (fileId: string, versionNumber: number, fileName: string) => {
+        try {
+            const blob = await fileService.downloadFileVersion(fileId, versionNumber);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${fileName} (v${versionNumber})`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            message.success('Dosya versiyonu indirme başladı');
+        } catch (error: any) {
+            message.error('Dosya versiyonu indirilirken bir hata oluştu: ' + error.message);
+        }
+    };
+
     const columns = [
         {
-            title: 'Dosya Adı',
+            title: 'Ad',
             dataIndex: 'name',
             key: 'name',
             render: (text: string, record: ExtendedFileDto) => (
-                <div
-                    style={{ display: 'flex', alignItems: 'center', cursor: record.contentType === 'folder' ? 'pointer' : 'default' }}
-                    onClick={() => {
-                        if (record.contentType === 'folder') {
-                            setCurrentFolderId(record.id);
-                        }
-                    }}
-                >
-                    <span style={{ fontSize: '18px', marginRight: 8, flexShrink: 0 }}>{record.icon || '📄'}</span>
-                    <span style={{ wordBreak: 'break-word', flexGrow: 1 }}>{text}</span>
-                </div>
+                <Space>
+                    <span>{record.icon}</span>
+                    <span>{text}</span>
+                    {!record.isFolder && !!record.versionCount && record.versionCount > 0 && (
+                        <Badge count={record.versionCount} style={{ backgroundColor: '#1890ff' }} />
+                    )}
+                </Space>
             ),
         },
         {
@@ -457,9 +490,7 @@ const FileManager: React.FC = () => {
                                         icon: <ShareAltOutlined />,
                                         onClick: () => {
                                             if (record.userId === user?.id) {
-                                                // record.contentType = 'folder' olduğunu biliyoruz çünkü bu klasör dropdown menüsü
                                                 const folderRecord = { ...record, isFolder: true, contentType: 'folder' };
-                                                console.log('Klasör paylaşımı için handleShareClick çağrılıyor:', folderRecord);
                                                 handleShareClick(folderRecord);
                                             } else {
                                                 message.info('Bu klasörü paylaşma yetkiniz yok.');
@@ -470,17 +501,13 @@ const FileManager: React.FC = () => {
                                         key: 'shared-users',
                                         label: 'Paylaşım Detayları',
                                         icon: <TeamOutlined />,
-                                        onClick: () => {
-                                            console.log('Klasör paylaşım detayları görüntüleniyor:', record.id, record.name);
-                                            // isFolder = true ile çağrı yapıyoruz
-                                            handleViewSharedUsers(record.id, record.name, true);
-                                        }
+                                        onClick: () => handleViewSharedUsers(record.id, record.name, true)
                                     },
                                     {
                                         key: 'delete',
                                         label: 'Sil',
                                         danger: true,
-                                        onClick: () => handleDelete(record.id, record.contentType === 'folder' ? 'folder' : 'file')
+                                        onClick: () => handleDelete(record.id, 'folder')
                                     }
                                 ]
                             }}
@@ -505,6 +532,15 @@ const FileManager: React.FC = () => {
                                     type="text"
                                 />
                             </Tooltip>
+                            {!!record.versionCount && record.versionCount > 0 && (
+                                <Tooltip title="Versiyonlar">
+                                    <Button
+                                        icon={<HistoryOutlined />}
+                                        onClick={() => handleViewVersions(record)}
+                                        type="text"
+                                    />
+                                </Tooltip>
+                            )}
                             {record.userId === user?.id && (
                                 <Tooltip title="Sil">
                                     <Button
@@ -532,7 +568,7 @@ const FileManager: React.FC = () => {
                                 <Tooltip title="Paylaşım Detayları">
                                     <Button
                                         icon={<TeamOutlined />}
-                                        onClick={() => handleViewSharedUsers(record.id, record.name, record.contentType === 'folder')}
+                                        onClick={() => handleViewSharedUsers(record.id, record.name, false)}
                                         type="text"
                                     />
                                 </Tooltip>
@@ -1330,6 +1366,76 @@ const FileManager: React.FC = () => {
                         <Input />
                     </Form.Item>
                 </Form>
+            </Modal>
+
+            {/* Versiyonlar Modalı */}
+            <Modal
+                title={`${selectedFileForVersions?.name} - Versiyonlar`}
+                open={versionsModalVisible}
+                onCancel={() => {
+                    setVersionsModalVisible(false);
+                    setSelectedFileForVersions(null);
+                    setFileVersions([]);
+                }}
+                footer={null}
+                width={800}
+            >
+                <Table
+                    dataSource={fileVersions}
+                    loading={loadingVersions}
+                    rowKey="id"
+                    columns={[
+                        {
+                            title: 'Versiyon',
+                            dataIndex: 'versionNumber',
+                            key: 'versionNumber',
+                            render: (versionNumber: number) => `v${versionNumber}`,
+                        },
+                        {
+                            title: 'Yüklenme Tarihi',
+                            dataIndex: 'uploadedAt',
+                            key: 'uploadedAt',
+                            render: (date: string) => new Date(date).toLocaleString('tr-TR'),
+                        },
+                        {
+                            title: 'Boyut',
+                            dataIndex: 'fileSize',
+                            key: 'fileSize',
+                            render: (size: number) => formatFileSize(size),
+                        },
+                        {
+                            title: 'Yükleyen',
+                            dataIndex: 'uploadedBy',
+                            key: 'uploadedBy',
+                        },
+                        {
+                            title: 'Değişiklik Notları',
+                            dataIndex: 'changeNotes',
+                            key: 'changeNotes',
+                            render: (notes: string) => notes || '-',
+                        },
+                        {
+                            title: 'İşlemler',
+                            key: 'actions',
+                            render: (text: string, record: FileVersionDto) => (
+                                <Space>
+                                    <Tooltip title="İndir">
+                                        <Button
+                                            icon={<DownloadOutlined />}
+                                            onClick={() => handleDownloadVersion(
+                                                selectedFileForVersions?.id || '',
+                                                record.versionNumber,
+                                                selectedFileForVersions?.name || ''
+                                            )}
+                                            type="text"
+                                        />
+                                    </Tooltip>
+                                </Space>
+                            ),
+                        },
+                    ]}
+                    pagination={false}
+                />
             </Modal>
         </div>
     );

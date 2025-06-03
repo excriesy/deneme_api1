@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.ComponentModel.DataAnnotations;
 using ShareVault.API.Interfaces;
 using ShareVault.API.DTOs;
+using Microsoft.Extensions.Logging;
 
 namespace ShareVault.API.Controllers
 {
@@ -23,16 +24,26 @@ namespace ShareVault.API.Controllers
         private readonly IWebHostEnvironment _environment;
         private const long MaxFileSize = 100 * 1024 * 1024; // 100MB
         private static readonly string[] AllowedExtensions = { ".pdf", ".doc", ".docx", ".txt", ".jpg", ".jpeg", ".png", ".gif" };
-        private readonly ShareVault.API.Interfaces.IFileService _fileService;
+        private readonly IFileService _fileService;
         private readonly ILogService _logService;
+        private readonly IVersioningService _versioningService;
+        private readonly ILogger<FileController> _logger;
         private readonly string _tempUploadPath;
 
-        public FileController(AppDbContext context, IWebHostEnvironment environment, ShareVault.API.Interfaces.IFileService fileService, ILogService logService)
+        public FileController(
+            AppDbContext context, 
+            IWebHostEnvironment environment, 
+            IFileService fileService, 
+            ILogService logService, 
+            IVersioningService versioningService,
+            ILogger<FileController> logger)
         {
             _context = context;
             _environment = environment;
             _fileService = fileService;
             _logService = logService;
+            _versioningService = versioningService;
+            _logger = logger;
             _tempUploadPath = Path.Combine(_environment.ContentRootPath, "TempUploads");
             
             if (!Directory.Exists(_tempUploadPath))
@@ -281,7 +292,23 @@ namespace ShareVault.API.Controllers
             try
             {
                 await _logService.LogInfoAsync($"Kullanıcı {userId} için paylaşılan dosyalar listesi isteniyor.", userId);
+                
+                // Önce paylaşım kayıtlarını kontrol et
+                var sharedFileRecords = await _context.SharedFiles
+                    .Where(sf => sf.SharedWithUserId == userId && sf.IsActive)
+                    .ToListAsync();
+
+                await _logService.LogInfoAsync($"Kullanıcı {userId} için aktif paylaşım kaydı sayısı: {sharedFileRecords.Count}", userId);
+
+                if (!sharedFileRecords.Any())
+                {
+                    await _logService.LogInfoAsync($"Kullanıcı {userId} için aktif paylaşım kaydı bulunamadı.", userId);
+                    return Ok(new List<FileDto>());
+                }
+
                 var sharedFiles = await _fileService.ListSharedFilesAsync(userId);
+                await _logService.LogInfoAsync($"Kullanıcı {userId} için paylaşılan dosya sayısı: {sharedFiles.Count()}", userId);
+
                 return Ok(sharedFiles);
             }
             catch (Exception ex)
@@ -871,6 +898,117 @@ namespace ShareVault.API.Controllers
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 await _logService.LogErrorAsync("Toplu dosya paylaşma hatası", ex, userId);
                 return StatusCode(500, "Dosyalar paylaşılırken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Dosyanın versiyonlarını listeler.
+        /// </summary>
+        /// <param name="fileId">Dosya ID</param>
+        /// <returns>Dosya versiyonları listesi</returns>
+        [HttpGet("{fileId}/versions")]
+        [ProducesResponseType(typeof(IEnumerable<FileVersionDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<IEnumerable<FileVersionDto>>> GetFileVersions(string fileId)
+        {
+            try
+            {
+                _logger.LogInformation($"Dosya versiyonları alınıyor. FileID: {fileId}");
+                
+                var file = await _fileService.GetFileByIdAsync(fileId);
+                if (file == null)
+                {
+                    _logger.LogWarning($"Dosya bulunamadı. FileID: {fileId}");
+                    return NotFound("Dosya bulunamadı");
+                }
+
+                var versions = await _versioningService.GetFileVersionsAsync(fileId);
+                var versionDtos = versions.Select(v => new DTOs.FileVersionDto
+                {
+                    Id = v.Id,
+                    FileId = v.FileId,
+                    VersionNumber = v.VersionNumber,
+                    FileName = file.Name,
+                    FileSize = v.Size,
+                    UploadedAt = v.CreatedAt,
+                    UploadedBy = v.UserId,
+                    ChangeNotes = v.ChangeNotes
+                });
+
+                return Ok(versionDtos);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"Dosya versiyonları alınırken hata oluştu. FileID: {fileId}");
+                return StatusCode(500, "Dosya versiyonları alınırken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Belirli bir dosya versiyonunu indirir.
+        /// </summary>
+        /// <param name="fileId">Dosya ID</param>
+        /// <param name="versionNumber">Versiyon numarası</param>
+        /// <returns>Dosya içeriği</returns>
+        [HttpGet("{fileId}/versions/{versionNumber}")]
+        [ProducesResponseType(typeof(FileStreamResult), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DownloadFileVersion(string fileId, string versionNumber)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId);
+                if (file == null)
+                    return NotFound("Dosya bulunamadı");
+
+                var version = await _versioningService.GetFileVersionAsync(fileId, versionNumber);
+                if (version == null)
+                    return NotFound("Belirtilen versiyon bulunamadı");
+
+                var fileBytes = await _fileService.DownloadFileAsync(fileId, userId);
+                return File(fileBytes, "application/octet-stream", $"{Path.GetFileNameWithoutExtension(file.Name)}_v{versionNumber}{Path.GetExtension(file.Name)}");
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya versiyonu indirme hatası", ex, userId);
+                return StatusCode(500, "Dosya versiyonu indirilirken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Yeni bir dosya versiyonu oluşturur.
+        /// </summary>
+        /// <param name="fileId">Dosya ID</param>
+        /// <param name="request">Versiyon oluşturma isteği</param>
+        /// <returns>Oluşturulan versiyon bilgisi</returns>
+        [HttpPost("{fileId}/versions")]
+        [ProducesResponseType(typeof(FileVersion), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> CreateFileVersion(string fileId, [FromBody] CreateVersionRequest request)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var file = await _context.Files.FirstOrDefaultAsync(f => f.Id == fileId);
+                if (file == null)
+                    return NotFound("Dosya bulunamadı");
+
+                var version = await _versioningService.CreateFileVersionAsync(file, userId, request.ChangeNotes);
+                return Ok(version);
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya versiyonu oluşturulurken hata oluştu", ex, userId);
+                return StatusCode(500, "Dosya versiyonu oluşturulurken bir hata oluştu");
             }
         }
     }

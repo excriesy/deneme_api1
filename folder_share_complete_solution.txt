@@ -1,0 +1,372 @@
+SHAREVAULT KLASÖR PAYLAŞIM TAM ÇÖZÜMÜ
+==================================================
+
+Tamam, ShareVault projeni tamamlaman için gerekli adımları detaylı bir şekilde anlatacağım. Her dosyanın tam yolunu, kopyala-yapıştır hazır kod örneklerini ve test talimatlarını da sağlayacağım. Başlayalım!
+
+1. BACKEND IMPLEMENTATION:
+
+a) Models/FolderPermission.cs
+```csharp
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace ShareVault.Models
+{
+    public class FolderPermission
+    {
+        [Key]
+        public int Id { get; set; }
+        
+        [ForeignKey("Folder")]
+        public int FolderId { get; set; }
+        public Folder Folder { get; set; }
+        
+        [ForeignKey("User")]
+        public int UserId { get; set; }
+        public User User { get; set; }
+        
+        public string Permission { get; set; }
+    }
+}
+```
+
+b) Models/FolderShare.cs
+```csharp
+using System;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace ShareVault.Models
+{
+    public class FolderShare
+    {
+        [Key] 
+        public int Id { get; set; }
+        
+        [ForeignKey("Folder")]
+        public int FolderId { get; set; }
+        public Folder Folder { get; set; }
+        
+        [ForeignKey("SharedByUser")]
+        public int SharedByUserId { get; set; }
+        public User SharedByUser { get; set; }
+        
+        [ForeignKey("SharedWithUser")]
+        public int SharedWithUserId { get; set; }
+        public User SharedWithUser { get; set; }
+        
+        public DateTime SharedDate { get; set; }
+    }
+}
+```
+
+c) Controllers/ShareController.cs
+```csharp
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using ShareVault.Data;
+using ShareVault.DTOs;
+using ShareVault.Models;
+
+namespace ShareVault.Controllers
+{
+    [Route("api/[controller]")]
+    [ApiController]
+    public class ShareController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+
+        public ShareController(ApplicationDbContext context)
+        {
+            _context = context;
+        }
+        
+        // POST: api/Share
+        [HttpPost]
+        public async Task<ActionResult<ShareResponseDto>> CreateShare(CreateShareDto createShareDto)
+        {
+            var folder = await _context.Folders.FindAsync(createShareDto.FolderId);
+            var sharedByUser = await _context.Users.FindAsync(createShareDto.SharedByUserId);
+            var sharedWithUser = await _context.Users.FindAsync(createShareDto.SharedWithUserId);
+
+            if (folder == null || sharedByUser == null || sharedWithUser == null)
+            {
+                return BadRequest("Invalid folder or user.");
+            }
+
+            var folderShare = new FolderShare
+            {
+                Folder = folder,
+                SharedByUser = sharedByUser,
+                SharedWithUser = sharedWithUser,
+                SharedDate = DateTime.UtcNow
+            };
+
+            _context.FolderShares.Add(folderShare);
+            await _context.SaveChangesAsync();
+
+            return new ShareResponseDto
+            {
+                Id = folderShare.Id,
+                FolderId = folderShare.FolderId,
+                SharedByUserId = folderShare.SharedByUserId,
+                SharedWithUserId = folderShare.SharedWithUserId,
+                SharedDate = folderShare.SharedDate
+            };
+        }
+        
+        // GET: api/Share
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<ShareResponseDto>>> GetShares()
+        {
+            var folderShares = await _context.FolderShares
+                .Include(fs => fs.Folder)
+                .Include(fs => fs.SharedByUser)
+                .Include(fs => fs.SharedWithUser)
+                .ToListAsync();
+
+            var shareResponseDtos = folderShares.Select(fs => new ShareResponseDto
+            {
+                Id = fs.Id,
+                FolderId = fs.FolderId,
+                SharedByUserId = fs.SharedByUserId,
+                SharedWithUserId = fs.SharedWithUserId,
+                SharedDate = fs.SharedDate
+            });
+
+            return Ok(shareResponseDtos);
+        }
+        
+        // DELETE: api/Share/5
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteShare(int id)
+        {
+            var folderShare = await _context.FolderShares.FindAsync(id);
+
+            if (folderShare == null)
+            {
+                return NotFound();
+            }
+
+            _context.FolderShares.Remove(folderShare);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+    }
+}
+```
+
+d) Controllers/FolderController.cs güncelleme
+```csharp
+// Existing code...
+
+// GET: api/Folder/5/shares
+[HttpGet("{id}/shares")]
+public async Task<ActionResult<IEnumerable<ShareResponseDto>>> GetFolderShares(int id)
+{
+    var folderShares = await _context.FolderShares
+        .Where(fs => fs.FolderId == id)
+        .Include(fs => fs.SharedByUser)
+        .Include(fs => fs.SharedWithUser)
+        .ToListAsync();
+
+    var shareResponseDtos = folderShares.Select(fs => new ShareResponseDto
+    {
+        Id = fs.Id,
+        FolderId = fs.FolderId,
+        SharedByUserId = fs.SharedByUserId,
+        SharedWithUserId = fs.SharedWithUserId,
+        SharedDate = fs.SharedDate
+    });
+
+    return Ok(shareResponseDtos);
+}
+
+// Existing code...
+```
+
+e) DTOs/CreateShareDto.cs
+```csharp
+namespace ShareVault.DTOs
+{
+    public class CreateShareDto
+    {
+        public int FolderId { get; set; }
+        public int SharedByUserId { get; set; }
+        public int SharedWithUserId { get; set; }
+    }
+}
+```
+
+f) DTOs/ShareResponseDto.cs 
+```csharp
+using System;
+
+namespace ShareVault.DTOs
+{
+    public class ShareResponseDto
+    {
+        public int Id { get; set; }
+        public int FolderId { get; set; }
+        public int SharedByUserId { get; set; }
+        public int SharedWithUserId { get; set; }
+        public DateTime SharedDate { get; set; }
+    }
+}
+```
+
+g) Migration script (SQL)
+- Add-Migration "AddFolderShare" in Package Manager Console
+- Update-Database
+
+2. FRONTEND (REACT COMPONENTS):
+
+a) components/ShareFolder.js
+```jsx
+import React, { useState } from 'react';
+import { Modal, Button, Form } from 'react-bootstrap';
+import { shareFolder } from '../services/shareService';
+
+const ShareFolder = ({ folderId, onShareSuccess }) => {
+  const [show, setShow] = useState(false);
+  const [sharedWithUserId, setSharedWithUserId] = useState('');
+
+  const handleClose = () => setShow(false);
+  const handleShow = () => setShow(true);
+
+  const handleShare = async () => {
+    try {
+      await shareFolder(folderId, sharedWithUserId);
+      onShareSuccess();
+      handleClose();
+    } catch (error) {
+      console.error('Error sharing folder:', error);
+    }
+  };
+
+  return (
+    <>
+      <Button variant="primary" onClick={handleShow}>
+        Share Folder
+      </Button>
+
+      <Modal show={show} onHide={handleClose}>
+        <Modal.Header closeButton>
+          <Modal.Title>Share Folder</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form.Group>
+            <Form.Label>Share with User ID:</Form.Label>
+            <Form.Control
+              type="text"
+              value={sharedWithUserId}
+              onChange={(e) => setSharedWithUserId(e.target.value)}
+            />
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleShare}>
+            Share
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </>
+  );
+};
+
+export default ShareFolder;
+```
+
+b) components/SharedFolders.js
+```jsx
+import React, { useState, useEffect } from 'react';
+import { ListGroup } from 'react-bootstrap';
+import { getSharedFolders } from '../services/shareService';
+
+const SharedFolders = () => {
+  const [sharedFolders, setSharedFolders] = useState([]);
+
+  useEffect(() => {
+    fetchSharedFolders();
+  }, []);
+
+  const fetchSharedFolders = async () => {
+    try {
+      const folders = await getSharedFolders();
+      setSharedFolders(folders);
+    } catch (error) {
+      console.error('Error fetching shared folders:', error);
+    }
+  };
+
+  return (
+    <div>
+      <h3>Shared Folders</h3>
+      <ListGroup>
+        {sharedFolders.map((folder) => (
+          <ListGroup.Item key={folder.id}>
+            Folder ID: {folder.folderId} | Shared By: {folder.sharedByUserId} | Shared With: {folder.sharedWithUserId}
+          </ListGroup.Item>
+        ))}
+      </ListGroup>
+    </div>
+  );
+};
+
+export default SharedFolders;
+```
+
+c) services/shareService.js
+```js
+import axios from 'axios';
+
+const API_URL = 'http://localhost:5000/api';
+
+export const shareFolder = async (folderId, sharedWithUserId) => {
+  const response = await axios.post(`${API_URL}/share`, {
+    folderId,
+    sharedByUserId: localStorage.getItem('userId'),
+    sharedWithUserId,
+  });
+  return response.data;
+};
+
+export const getSharedFolders = async () => {
+  const response = await axios.get(`${API_URL}/share`);
+  return response.data;
+};
+```
+
+3. INTEGRATION:
+
+a) Backend-Frontend bağlantısı
+- Backend'i `dotnet run` komutu ile çalıştır
+- Frontend'i `npm start` komutu ile çalıştır
+- API URL'lerini güncelleyerek backend ile iletişimi sağla
+
+b) Error handling
+- try-catch blokları ile hata kontrolü yap
+- Hata mesajlarını console'a yazdır veya kullanıcıya uyarı olarak göster
+
+c) Security (token validation)
+- Backend tarafında JWT token doğrulama mekanizması eklenmiş olmalı
+- Frontend tarafında API isteklerine token'ı header olarak ekle
+- Örnek: `axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;`
+
+TEST TALİMATLARI:
+1. Projeyi çalıştır (backend ve frontend)
+2. Kullanıcı olarak giriş yap
+3. Klasör oluştur veya mevcut bir klasöre git
+4. "Share Folder" butonuna tıkla
+5. Paylaşmak istediğin kullanıcının ID'sini gir ve "Share" butonuna tıkla
+6. Paylaşılan klasörleri "Shared Folders" listesinde gör
+7. Paylaşımı kaldırmak için backend üzerinden DELETE isteği gönder
+
+Bu şekilde ShareVault projen için klasör paylaşım sistemi tamamlanmış oldu. Herhangi bir sorun yaşarsan bana danışabilirsin. Umarım faydalı olmuştur. Başarılar!

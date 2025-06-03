@@ -13,6 +13,7 @@ export interface FileDto {
     isPreviewable?: boolean;
     folderId?: string | null;
     isFolder?: boolean;
+    versionCount?: number;
 }
 
 export interface FileDetailsDto extends FileDto {
@@ -28,6 +29,16 @@ export interface SharedFileDto {
     sharedAt: string;
     expiresAt?: string;
     canEdit: boolean;
+}
+
+export interface FileVersionDto {
+    id: string;
+    versionNumber: number;
+    fileName: string;
+    fileSize: number;
+    uploadedAt: string;
+    uploadedBy: string;
+    changeNotes?: string;
 }
 
 interface UploadProgressEvent {
@@ -161,7 +172,19 @@ const fileService = {
 
     async renameFolder(folderId: string, newName: string): Promise<void> {
         await api.put(`/folder/${folderId}?name=${encodeURIComponent(newName)}`);
-    }
+    },
+
+    async getFileVersions(fileId: string): Promise<FileVersionDto[]> {
+        const response = await api.get<FileVersionDto[]>(`/file/${fileId}/versions`);
+        return response.data;
+    },
+
+    async downloadFileVersion(fileId: string, versionNumber: number): Promise<Blob> {
+        const response = await api.get(`/file/${fileId}/versions/${versionNumber}`, {
+            responseType: 'blob'
+        });
+        return response.data as Blob;
+    },
 };
 
 export default fileService; 

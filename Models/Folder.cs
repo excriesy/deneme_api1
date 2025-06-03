@@ -19,6 +19,9 @@ namespace ShareVault.API.Models
 
         public string? ParentFolderId { get; set; }
 
+        [Required]
+        public required string Path { get; set; }
+
         public DateTime CreatedAt { get; set; }
 
         public DateTime? UpdatedAt { get; set; }

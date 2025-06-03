@@ -17,6 +17,7 @@ namespace ShareVault.API.Models
         public required string Path { get; set; }
         public required string UserId { get; set; }
         public DateTime UploadedAt { get; set; }
+        public DateTime LastModified { get; set; }
         public bool IsPublic { get; set; }
         public DateTime? ExpiresAt { get; set; }
         public string? FolderId { get; set; }

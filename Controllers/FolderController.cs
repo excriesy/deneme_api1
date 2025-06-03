@@ -19,12 +19,14 @@ namespace ShareVault.API.Controllers
         private readonly AppDbContext _context;
         private readonly IFolderService _folderService;
         private readonly ILogService _logService;
+        private readonly IVersioningService _versioningService;
 
-        public FolderController(AppDbContext context, IFolderService folderService, ILogService logService)
+        public FolderController(AppDbContext context, IFolderService folderService, ILogService logService, IVersioningService versioningService)
         {
             _context = context;
             _folderService = folderService;
             _logService = logService;
+            _versioningService = versioningService;
         }
 
         /// <summary>
@@ -442,6 +444,99 @@ namespace ShareVault.API.Controllers
         }
 
         #endregion
-    }
 
+        /// <summary>
+        /// Klasörün versiyonlarını listeler.
+        /// </summary>
+        /// <param name="folderId">Klasör ID</param>
+        /// <returns>Klasör versiyonları listesi</returns>
+        [HttpGet("{folderId}/versions")]
+        [ProducesResponseType(typeof(IEnumerable<FolderVersion>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetFolderVersions(string folderId)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var folder = await _context.Folders.FirstOrDefaultAsync(f => f.Id == folderId);
+                if (folder == null)
+                    return NotFound("Klasör bulunamadı");
+
+                var versions = await _versioningService.GetFolderVersionsAsync(folderId);
+                return Ok(versions);
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Klasör versiyonları listelenirken hata oluştu", ex, userId);
+                return StatusCode(500, "Klasör versiyonları listelenirken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Belirli bir klasör versiyonunu görüntüler.
+        /// </summary>
+        /// <param name="folderId">Klasör ID</param>
+        /// <param name="versionNumber">Versiyon numarası</param>
+        /// <returns>Klasör yapısı</returns>
+        [HttpGet("{folderId}/versions/{versionNumber}")]
+        [ProducesResponseType(typeof(FolderVersion), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetFolderVersion(string folderId, string versionNumber)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var version = await _versioningService.GetFolderVersionAsync(folderId, versionNumber);
+                if (version == null)
+                    return NotFound("Klasör versiyonu bulunamadı");
+
+                return Ok(version);
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Klasör versiyonu görüntülenirken hata oluştu", ex, userId);
+                return StatusCode(500, "Klasör versiyonu görüntülenirken bir hata oluştu");
+            }
+        }
+
+        /// <summary>
+        /// Yeni bir klasör versiyonu oluşturur.
+        /// </summary>
+        /// <param name="folderId">Klasör ID</param>
+        /// <param name="changeNotes">Değişiklik notları</param>
+        /// <returns>Oluşturulan versiyon bilgisi</returns>
+        [HttpPost("{folderId}/versions")]
+        [ProducesResponseType(typeof(FolderVersion), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(string), StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> CreateFolderVersion(string folderId, [FromBody] string? changeNotes = null)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                var folder = await _context.Folders.FirstOrDefaultAsync(f => f.Id == folderId);
+                if (folder == null)
+                    return NotFound("Klasör bulunamadı");
+
+                var version = await _versioningService.CreateFolderVersionAsync(folder, userId, changeNotes);
+                return Ok(version);
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Klasör versiyonu oluşturulurken hata oluştu", ex, userId);
+                return StatusCode(500, "Klasör versiyonu oluşturulurken bir hata oluştu");
+            }
+        }
+    }
 } 

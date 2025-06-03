@@ -33,9 +33,10 @@ namespace ShareVault.API.Services
                 if (string.IsNullOrEmpty(name))
                     throw new ArgumentException("Klasör adı boş olamaz");
 
+                Folder? parentFolder = null;
                 if (parentFolderId != null)
                 {
-                    var parentFolder = await _context.Folders
+                    parentFolder = await _context.Folders
                         .FirstOrDefaultAsync(f => f.Id == parentFolderId && f.UserId == userId);
 
                     if (parentFolder == null)
@@ -48,6 +49,9 @@ namespace ShareVault.API.Services
                     Name = name,
                     UserId = userId,
                     ParentFolderId = parentFolderId,
+                    Path = parentFolderId != null && parentFolder != null ? 
+                        $"{parentFolder.Path}/{name}" : 
+                        $"/{name}",
                     CreatedAt = DateTime.UtcNow
                 };
 
@@ -403,9 +407,10 @@ namespace ShareVault.API.Services
 
                 // Önce klasörün varlığını ve kullanıcının sahipliğini kontrol et
                 var folder = await _context.Folders
+                    .Include(f => f.Owner)
                     .FirstOrDefaultAsync(f => f.Id == folderId && f.UserId == userId);
 
-                if (folder == null)
+                if (folder == null || folder.Owner == null)
                 {
                     await _logService.LogErrorAsync($"Klasör bulunamadı veya kullanıcıya ait değil: {folderId}", 
                         new KeyNotFoundException("Klasör bulunamadı veya kullanıcıya ait değil"), userId);
@@ -460,9 +465,10 @@ namespace ShareVault.API.Services
 
                 // Önce klasörün varlığını ve kullanıcının sahipliğini kontrol et
                 var folder = await _context.Folders
+                    .Include(f => f.Owner)
                     .FirstOrDefaultAsync(f => f.Id == folderId && f.UserId == userId);
 
-                if (folder == null)
+                if (folder == null || folder.Owner == null)
                 {
                     await _logService.LogErrorAsync($"Klasör bulunamadı veya kullanıcıya ait değil: {folderId}", 
                         new KeyNotFoundException("Klasör bulunamadı veya kullanıcıya ait değil"), userId);

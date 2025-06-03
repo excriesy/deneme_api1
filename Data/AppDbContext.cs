@@ -18,6 +18,7 @@ namespace ShareVault.API.Data
         public DbSet<FileModel> Files { get; set; }
         public DbSet<FileVersion> FileVersions { get; set; }
         public DbSet<Folder> Folders { get; set; }
+        public DbSet<FolderVersion> FolderVersions { get; set; }
         
         // Paylaşım modelleri
         public DbSet<SharedFile> SharedFiles { get; set; }
@@ -109,6 +110,7 @@ namespace ShareVault.API.Data
             {
                 entity.HasKey(e => e.Id);
                 entity.Property(e => e.Name).HasMaxLength(255).IsRequired();
+                entity.Property(e => e.Path).IsRequired();
                 entity.Property(e => e.Tags).HasMaxLength(500);
                 entity.Property(e => e.Description).HasMaxLength(1000);
                 entity.Property(e => e.DeletedBy).HasMaxLength(50);
@@ -122,6 +124,23 @@ namespace ShareVault.API.Data
                     .HasForeignKey(e => e.ParentFolderId)
                     .OnDelete(DeleteBehavior.Restrict)
                     .IsRequired(false);
+            });
+
+            modelBuilder.Entity<FolderVersion>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Path).IsRequired();
+                entity.Property(e => e.VersionNumber).HasMaxLength(20).IsRequired();
+                entity.Property(e => e.ChangeNotes).HasMaxLength(1000);
+                entity.Property(e => e.StructureHash).IsRequired();
+                entity.HasOne(e => e.Folder)
+                    .WithMany()
+                    .HasForeignKey(e => e.FolderId)
+                    .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(e => e.CreatedBy)
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             // Paylaşım Yapılandırmaları

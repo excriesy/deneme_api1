@@ -20,6 +20,7 @@ namespace ShareVault.API.DTOs
         public string? Description { get; set; }
         public bool IsDeleted { get; set; }
         public int VersionCount { get; set; }
+        public bool IsShared { get; set; }
     }
 
     public class FileDetailsDto : FileDto
@@ -36,13 +37,13 @@ namespace ShareVault.API.DTOs
     
     public class FileVersionDto
     {
-        public required string Id { get; set; }
-        public required string FileId { get; set; }
-        public required string VersionNumber { get; set; }
-        public required long Size { get; set; }
-        public required DateTime CreatedAt { get; set; }
-        public required string UserId { get; set; }
-        public string? UserName { get; set; }
+        public string Id { get; set; } = string.Empty;
+        public string FileId { get; set; } = string.Empty;
+        public string VersionNumber { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public long FileSize { get; set; }
+        public DateTime UploadedAt { get; set; }
+        public string UploadedBy { get; set; } = string.Empty;
         public string? ChangeNotes { get; set; }
     }
 
@@ -118,5 +119,10 @@ namespace ShareVault.API.DTOs
         public required string UserId { get; set; }
         public bool Success { get; set; }
         public required string Message { get; set; }
+    }
+
+    public class CreateVersionRequest
+    {
+        public string? ChangeNotes { get; set; }
     }
 } 

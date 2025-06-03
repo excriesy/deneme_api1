@@ -18,6 +18,7 @@ namespace ShareVault.API.Services
         private readonly IWebHostEnvironment _environment;
         private readonly ILogService _logService;
         private readonly ICacheService _cacheService;
+        private readonly IVersioningService _versioningService;
         private readonly string _uploadPath;
         private const int ChunkSize = 1024 * 1024; // 1MB chunks
 
@@ -25,12 +26,14 @@ namespace ShareVault.API.Services
             AppDbContext context,
             IWebHostEnvironment environment,
             ILogService logService,
-            ICacheService cacheService)
+            ICacheService cacheService,
+            IVersioningService versioningService)
         {
             _context = context;
             _environment = environment;
             _logService = logService;
             _cacheService = cacheService;
+            _versioningService = versioningService;
             _uploadPath = Path.Combine(_environment.ContentRootPath, "Uploads");
             
             if (!Directory.Exists(_uploadPath))
@@ -51,72 +54,111 @@ namespace ShareVault.API.Services
                     throw new FileNotFoundException($"Geçici dosya bulunamadı: {tempFilePath}");
                 }
 
-                var fileId = Guid.NewGuid().ToString();
+                // Aynı isimde ve aynı klasörde dosya var mı kontrolü
+                var existingFile = await _context.Files
+                    .FirstOrDefaultAsync(f => f.Name == originalFileName && f.FolderId == folderId && f.UserId == userId && !f.IsDeleted);
+
                 var extension = Path.GetExtension(originalFileName);
-                var fileName = $"{fileId}{extension}";
-                var filePath = Path.Combine(_uploadPath, fileName);
+                string fileId;
+                string filePath;
+                FileInfo fileInfo;
 
-                await _logService.LogInfoAsync($"Dosya yolu oluşturuldu: {filePath}", userId);
-
-                try
+                if (existingFile != null)
                 {
-                    // Dosyayı kopyala ve sonra orijinali sil
+                    // Mevcut dosyanın üzerine yaz
+                    fileId = existingFile.Id;
+                    filePath = existingFile.Path;
+
                     System.IO.File.Copy(tempFilePath, filePath, true);
                     System.IO.File.Delete(tempFilePath);
-                    await _logService.LogInfoAsync("Dosya başarıyla kopyalandı ve geçici dosya silindi", userId);
-                }
-                catch (Exception ex)
-                {
-                    await _logService.LogErrorAsync($"Dosya kopyalama hatası: {ex.Message}", ex, userId);
-                    throw new IOException($"Dosya kopyalama hatası: {ex.Message}", ex);
-                }
 
-                var fileInfo = new FileInfo(filePath);
-                if (!fileInfo.Exists)
-                {
-                    await _logService.LogErrorAsync("Dosya kopyalandıktan sonra bulunamadı", new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı"), userId);
-                    throw new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı");
-                }
+                    fileInfo = new FileInfo(filePath);
+                    existingFile.Size = fileInfo.Length;
+                    existingFile.ContentType = GetContentType(extension);
+                    existingFile.LastModified = DateTime.UtcNow;
+                    existingFile.Path = filePath;
 
-                await _logService.LogInfoAsync($"Dosya bilgileri - Boyut: {fileInfo.Length}, Oluşturulma: {fileInfo.CreationTime}, Son Değişiklik: {fileInfo.LastWriteTime}", userId);
-
-                var file = new FileModel
-                {
-                    Id = fileId,
-                    Name = originalFileName,
-                    Path = filePath,
-                    ContentType = GetContentType(extension),
-                    Size = fileInfo.Length,
-                    UserId = userId,
-                    UploadedAt = DateTime.UtcNow,
-                    FolderId = folderId
-                };
-
-                await _logService.LogInfoAsync($"Dosya modeli oluşturuldu. ID: {fileId}, Boyut: {fileInfo.Length}, Klasör ID: {folderId}", userId);
-
-                try
-                {
-                    _context.Files.Add(file);
                     await _context.SaveChangesAsync();
-                    await _logService.LogInfoAsync("Dosya veritabanına kaydedildi", userId);
+
+                    // Versiyon oluştur
+                    await _versioningService.CreateFileVersionAsync(existingFile, userId, "Aynı isimde dosya yüklendi, yeni versiyon oluşturuldu.");
+
+                    // Önbelleği temizle
+                    _cacheService.Remove($"user_files_and_folders_{userId}_{folderId ?? "root"}");
+                    _cacheService.Remove($"user_files_{userId}");
+                    await _logService.LogInfoAsync("Aynı isimde dosya bulundu, yeni versiyon oluşturuldu ve önbellek temizlendi", userId);
+
+                    return fileId;
                 }
-                catch (Exception ex)
+                else
                 {
-                    await _logService.LogErrorAsync($"Veritabanı kayıt hatası: {ex.Message}", ex, userId);
-                    // Dosyayı sil
-                    if (System.IO.File.Exists(filePath))
+                    fileId = Guid.NewGuid().ToString();
+                    var fileName = $"{fileId}{extension}";
+                    filePath = Path.Combine(_uploadPath, fileName);
+
+                    await _logService.LogInfoAsync($"Dosya yolu oluşturuldu: {filePath}", userId);
+
+                    try
                     {
-                        System.IO.File.Delete(filePath);
+                        // Dosyayı kopyala ve sonra orijinali sil
+                        System.IO.File.Copy(tempFilePath, filePath, true);
+                        System.IO.File.Delete(tempFilePath);
+                        await _logService.LogInfoAsync("Dosya başarıyla kopyalandı ve geçici dosya silindi", userId);
                     }
-                    throw new DbUpdateException($"Veritabanı kayıt hatası: {ex.Message}", ex);
+                    catch (Exception ex)
+                    {
+                        await _logService.LogErrorAsync($"Dosya kopyalama hatası: {ex.Message}", ex, userId);
+                        throw new IOException($"Dosya kopyalama hatası: {ex.Message}", ex);
+                    }
+
+                    fileInfo = new FileInfo(filePath);
+                    if (!fileInfo.Exists)
+                    {
+                        await _logService.LogErrorAsync("Dosya kopyalandıktan sonra bulunamadı", new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı"), userId);
+                        throw new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı");
+                    }
+
+                    await _logService.LogInfoAsync($"Dosya bilgileri - Boyut: {fileInfo.Length}, Oluşturulma: {fileInfo.CreationTime}, Son Değişiklik: {fileInfo.LastWriteTime}", userId);
+
+                    var file = new FileModel
+                    {
+                        Id = fileId,
+                        Name = originalFileName,
+                        Path = filePath,
+                        ContentType = GetContentType(extension),
+                        Size = fileInfo.Length,
+                        UserId = userId,
+                        UploadedAt = DateTime.UtcNow,
+                        LastModified = DateTime.UtcNow,
+                        FolderId = folderId
+                    };
+
+                    await _logService.LogInfoAsync($"Dosya modeli oluşturuldu. ID: {fileId}, Boyut: {fileInfo.Length}, Klasör ID: {folderId}", userId);
+
+                    try
+                    {
+                        _context.Files.Add(file);
+                        await _context.SaveChangesAsync();
+                        await _logService.LogInfoAsync("Dosya veritabanına kaydedildi", userId);
+                    }
+                    catch (Exception ex)
+                    {
+                        await _logService.LogErrorAsync($"Veritabanı kayıt hatası: {ex.Message}", ex, userId);
+                        // Dosyayı sil
+                        if (System.IO.File.Exists(filePath))
+                        {
+                            System.IO.File.Delete(filePath);
+                        }
+                        throw new DbUpdateException($"Veritabanı kayıt hatası: {ex.Message}", ex);
+                    }
+
+                    // Clear the cache for this user's file list in the specific folder or root
+                    _cacheService.Remove($"user_files_and_folders_{userId}_{folderId ?? "root"}");
+                    _cacheService.Remove($"user_files_{userId}");
+                    await _logService.LogInfoAsync("Dosya yükleme sonrası ilgili önbellekler temizlendi", userId);
+
+                    return fileId;
                 }
-
-                // Clear the cache for this user's file list in the specific folder or root
-                _cacheService.Remove($"user_files_and_folders_{userId}_{folderId ?? "root"}");
-                _cacheService.Remove($"user_files_{userId}"); // Keep this for backward compatibility if needed elsewhere
-                await _logService.LogInfoAsync("Dosya yükleme sonrası ilgili önbellekler temizlendi", userId);
-
-                return fileId;
             }
             catch (Exception ex)
             {
@@ -142,11 +184,13 @@ namespace ShareVault.API.Services
 
                 // Veritabanından dosya bilgilerini al
                 var file = await _context.Files
+                    .Include(f => f.UploadedBy)
                     .FirstOrDefaultAsync(f => f.Id == fileId);
 
-                if (file == null)
+                if (file == null || file.UploadedBy == null)
                 {
-                    await _logService.LogErrorAsync($"Dosya veritabanında bulunamadı. FileID: {fileId}", new KeyNotFoundException("Dosya bulunamadı"), userId);
+                    await _logService.LogErrorAsync($"Dosya bulunamadı veya yükleyen kullanıcı bilgisi eksik: {fileId}", 
+                        new KeyNotFoundException("Dosya bulunamadı"), userId);
                     throw new KeyNotFoundException("Dosya bulunamadı");
                 }
                 
@@ -288,13 +332,11 @@ namespace ShareVault.API.Services
                 {
                     // Log that an orphaned file record was found
                     _logService.LogWarning($"[{userId}] Dikkat: Veritabanında kaydı olan dosya diskte bulunamadı. ID: {f.Id}, Ad: {f.Name}, Path: {filePath}");
-                    // Optionally, you could add logic here to delete the orphaned database record
-                    // _context.Files.Remove(f); // Uncomment to automatically clean up orphaned records
                 }
                 return exists;
-            }).ToList(); // ToList() ekleyerek filtreleme uygulandı
+            }).ToList();
 
-            _logService.LogInformation($"[{userId}] Disk üzerinde bulunan dosyaların sayısı (veritabanından çekilen ve filtrelenen): {existingFilesOnDisk.Count}"); // Log ekledim
+            _logService.LogInformation($"[{userId}] Disk üzerinde bulunan dosyaların sayısı: {existingFilesOnDisk.Count}");
 
             var result = existingFilesOnDisk.Select(f => new FileDto
             {
@@ -308,7 +350,9 @@ namespace ShareVault.API.Services
                 Icon = GetFileIcon(f.ContentType),
                 FileType = GetFileType(f.ContentType),
                 IsPreviewable = IsPreviewable(f.ContentType),
-                FolderId = f.FolderId
+                FolderId = f.FolderId,
+                VersionCount = _context.FileVersions.Any(v => v.FileId == f.Id) ? _context.FileVersions.Count(v => v.FileId == f.Id) : 0,
+                IsShared = _context.SharedFiles.Any(sf => sf.FileId == f.Id && sf.SharedWithUserId == userId && sf.IsActive)
             }).Concat(folders.Select(f => new FileDto
             {
                 Id = f.Id,
@@ -321,13 +365,15 @@ namespace ShareVault.API.Services
                 Icon = "📁",
                 FileType = "Klasör",
                 IsPreviewable = false,
-                FolderId = f.ParentFolderId // Klasörler için ParentFolderId
-            })).ToList(); // ToList() ekleyerek sonuç somutlaştırıldı
+                FolderId = f.ParentFolderId,
+                VersionCount = 0,
+                IsShared = false
+            })).ToList();
 
             _logService.LogInformation($"[{userId}] ListFilesAsync sonuç listesi hazırlanıyor. Toplam öğe: {result.Count}");
             foreach (var item in result)
             {
-                _logService.LogInformation($"[{userId}] Sonuç öğesi - ID: {item.Id}, Ad: {item.Name}, Tür: {item.ContentType}");
+                _logService.LogInformation($"[{userId}] Sonuç öğesi - ID: {item.Id}, Ad: {item.Name}, Tür: {item.ContentType}, Versiyon: {item.VersionCount}, Paylaşılan: {item.IsShared}");
             }
 
             return result;
@@ -338,30 +384,31 @@ namespace ShareVault.API.Services
             await _logService.LogInfoAsync($"ListSharedFilesAsync başlatıldı. Kullanıcı: {userId}", userId);
             try
             {
+                // Paylaşılan dosyaları getir
                 var sharedFiles = await _context.SharedFiles
                     .Include(sf => sf.File)
-                        .ThenInclude(f => f.UploadedBy) // Dosya yükleyen kullanıcıyı include et
-                    .Where(sf => sf.SharedWithUserId == userId && sf.IsActive)
-                    .Select(sf => sf.File) // Paylaşılan dosyaları seç
-                    .Where(f => f != null) // Null olanları filtrele (olmamalı ama önlem)
+                        .ThenInclude(f => f.UploadedBy)
+                    .Where(sf => sf.SharedWithUserId == userId && sf.IsActive && !sf.File.IsDeleted)
                     .ToListAsync();
 
-                await _logService.LogInfoAsync($"Kullanıcı {userId} ile paylaşılan dosya sayısı: {sharedFiles.Count}", userId);
-
-                var fileDtos = sharedFiles.Select(file => new FileDto
+                var fileDtos = sharedFiles.Select(sf => new FileDto
                 {
-                    Id = file.Id,
-                    Name = file.Name.TrimStart().TrimEnd(),
-                    Size = file.Size,
-                    UploadedAt = file.UploadedAt,
-                    UploadedBy = file.UploadedBy?.Username ?? "Bilinmeyen Kullanıcı",
-                    UserId = file.UserId,
-                    ContentType = file.ContentType,
-                    Icon = GetFileIcon(file.ContentType), // FileService'deki GetFileIcon metodunu kullan
-                    FileType = GetFileType(file.ContentType), // FileService'deki GetFileType metodunu kullan
-                    IsPreviewable = IsPreviewable(file.ContentType),
-                    FolderId = file.FolderId
+                    Id = sf.File.Id,
+                    Name = sf.File.Name.TrimStart().TrimEnd(),
+                    Size = sf.File.Size,
+                    UploadedAt = sf.File.UploadedAt,
+                    UploadedBy = sf.File.UploadedBy != null ? sf.File.UploadedBy.Username : "Bilinmeyen Kullanıcı",
+                    UserId = sf.File.UserId,
+                    ContentType = sf.File.ContentType,
+                    Icon = GetFileIcon(sf.File.ContentType),
+                    FileType = GetFileType(sf.File.ContentType),
+                    IsPreviewable = IsPreviewable(sf.File.ContentType),
+                    FolderId = sf.File.FolderId,
+                    IsShared = true,
+                    VersionCount = _context.FileVersions.Count(v => v.FileId == sf.File.Id)
                 }).ToList();
+
+                await _logService.LogInfoAsync($"Kullanıcı {userId} için paylaşılan dosya sayısı: {fileDtos.Count}", userId);
 
                 return fileDtos;
             }
@@ -427,6 +474,13 @@ namespace ShareVault.API.Services
                 await _logService.LogErrorAsync($"Error revoking access for file {fileId} from user {sharedWithUserId}", ex, "System"); // User ID placeholder
                 throw;
             }
+        }
+
+        public async Task<FileModel?> GetFileByIdAsync(string fileId)
+        {
+            return await _context.Files
+                .Include(f => f.UploadedBy)
+                .FirstOrDefaultAsync(f => f.Id == fileId);
         }
 
         private string GetContentType(string extension)

@@ -158,6 +158,20 @@ const folderService = {
         });
         return response.data as FolderDto;
     },
+
+    /**
+     * Belirli bir klasörün içindeki klasörleri getirir
+     * @param parentFolderId Ebeveyn klasör ID'si, eğer undefined ise kök klasörü getirir
+     */
+    getFolders: async (parentFolderId?: string): Promise<FolderDto[]> => {
+        const url = parentFolderId 
+            ? `${API_URL}/contents/${parentFolderId}` 
+            : `${API_URL}/root`;
+        
+        console.log(`getFolders: API isteği gönderiliyor: ${url}`);
+        const response = await api.get(url);
+        return response.data as FolderDto[];
+    },
 };
 
 export default folderService;

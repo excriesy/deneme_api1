@@ -1,0 +1,26 @@
+Merhaba, dosya paylaşım sisteminizi inceledim ve bazı gözlemlerim var:
+
+1. Klasör paylaşımı, silme ve erişim kontrolü FolderController ve FolderService sınıflarında ele alınıyor. ShareFolder, GetSharedFolders, GetFolderShares, RevokeFolderAccess ve HasAccessToFolder gibi metotlar bu işlemleri gerçekleştiriyor.
+
+2. Klasör paylaşımında, paylaşılan klasörün alt klasörlerine ve dosyalarına erişim propagasyonu (yayılımı) doğrudan ele alınmamış. Klasör paylaşıldığında, alt klasörlere ve dosyalara otomatik olarak aynı izinlerin verilmesi gerekebilir. Bu şu anda eksik görünüyor.
+
+3. Dosya paylaşım mantığı FileController ve FileService sınıflarında bulunuyor ve çalışıyor durumda. Ancak, dosya paylaşımı klasör paylaşımından bağımsız olarak ele alınıyor. İdeal olarak, bir klasör paylaşıldığında içindeki dosyaların da paylaşılması veya bir klasörün paylaşımı iptal edildiğinde içindeki dosyaların paylaşımının da iptal edilmesi gerekir.
+
+4. Backend'de eksik veya hatalı rotalar tespit edemedim. Ancak, frontend'de bazı sorunlar var:
+   - FolderManager bileşeninde handleRevokeAccess fonksiyonu, paylaşım kaydı ID'sini (sharingRecordId) kullanarak erişimi iptal etmeye çalışıyor, ancak backend /folder/{folderId}/revoke-access rotasında sharedWithUserId bekliyor. Bu uyumsuzluk, erişim iptal işleminin hata vermesine neden olabilir.
+   - FileManager bileşeninde handleViewSharedUsers fonksiyonu, isFolder parametresini her zaman true olarak ayarlıyor. Bu, dosyalar için paylaşım detaylarının doğru şekilde getirilmemesine neden olabilir.
+
+5. Frontend'de durum yönetimi (state management) ve veri getirme (data fetching) işlemleri sonrasında bileşenlerin yeniden render edilmesi gerekiyor. Örneğin, bir klasör paylaşıldıktan, paylaşımı iptal edildikten veya bir dosya paylaşıldıktan sonra ilgili bileşenlerin (FolderManager, FileManager) paylaşım listesini güncellemesi gerekiyor. Bu şu anda her durumda doğru şekilde yapılmıyor.
+
+Önerilen iyileştirmeler:
+1. Klasör paylaşımında, alt klasörlere ve dosyalara erişim propagasyonunu sağlayın. Bir klasör paylaşıldığında, içindeki tüm alt klasörlere ve dosyalara da aynı izinleri verin.
+
+2. Dosya paylaşımını klasör paylaşımıyla entegre edin. Bir klasör paylaşıldığında, içindeki dosyaları da otomatik olarak paylaşın. Benzer şekilde, bir klasörün paylaşımı iptal edildiğinde, içindeki dosyaların paylaşımını da iptal edin.
+
+3. FolderManager bileşenindeki handleRevokeAccess fonksiyonunu, backend'in beklediği sharedWithUserId parametresini kullanacak şekilde güncelleyin.
+
+4. FileManager bileşenindeki handleViewSharedUsers fonksiyonunu, isFolder parametresini doğru şekilde ayarlayacak şekilde güncelleyin.
+
+5. Paylaşım işlemleri sonrasında ilgili bileşenlerin durumunu güncelleyin ve paylaşım listelerini yeniden getirin. Bu, kullanıcı arayüzünün her zaman güncel verileri göstermesini sağlar.
+
+Bu öneriler doğrultusunda gerekli düzeltmeleri ve iyileştirmeleri yaparak, klasör paylaşımı, silme ve erişim kontrolü işlevlerini daha sağlam ve tutarlı hale getirebilirsiniz. Ayrıca, frontend ve backend arasındaki veri akışını optimize ederek daha iyi bir kullanıcı deneyimi sağlayabilirsiniz.
