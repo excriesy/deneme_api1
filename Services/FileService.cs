@@ -93,71 +93,71 @@ namespace ShareVault.API.Services
                 else
                 {
                     fileId = Guid.NewGuid().ToString();
-                    var fileName = $"{fileId}{extension}";
+                var fileName = $"{fileId}{extension}";
                     filePath = Path.Combine(_uploadPath, fileName);
 
-                    await _logService.LogInfoAsync($"Dosya yolu oluşturuldu: {filePath}", userId);
+                await _logService.LogInfoAsync($"Dosya yolu oluşturuldu: {filePath}", userId);
 
-                    try
-                    {
-                        // Dosyayı kopyala ve sonra orijinali sil
-                        System.IO.File.Copy(tempFilePath, filePath, true);
-                        System.IO.File.Delete(tempFilePath);
-                        await _logService.LogInfoAsync("Dosya başarıyla kopyalandı ve geçici dosya silindi", userId);
-                    }
-                    catch (Exception ex)
-                    {
-                        await _logService.LogErrorAsync($"Dosya kopyalama hatası: {ex.Message}", ex, userId);
-                        throw new IOException($"Dosya kopyalama hatası: {ex.Message}", ex);
-                    }
+                try
+                {
+                    // Dosyayı kopyala ve sonra orijinali sil
+                    System.IO.File.Copy(tempFilePath, filePath, true);
+                    System.IO.File.Delete(tempFilePath);
+                    await _logService.LogInfoAsync("Dosya başarıyla kopyalandı ve geçici dosya silindi", userId);
+                }
+                catch (Exception ex)
+                {
+                    await _logService.LogErrorAsync($"Dosya kopyalama hatası: {ex.Message}", ex, userId);
+                    throw new IOException($"Dosya kopyalama hatası: {ex.Message}", ex);
+                }
 
                     fileInfo = new FileInfo(filePath);
-                    if (!fileInfo.Exists)
-                    {
-                        await _logService.LogErrorAsync("Dosya kopyalandıktan sonra bulunamadı", new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı"), userId);
-                        throw new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı");
-                    }
+                if (!fileInfo.Exists)
+                {
+                    await _logService.LogErrorAsync("Dosya kopyalandıktan sonra bulunamadı", new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı"), userId);
+                    throw new FileNotFoundException("Dosya kopyalandıktan sonra bulunamadı");
+                }
 
-                    await _logService.LogInfoAsync($"Dosya bilgileri - Boyut: {fileInfo.Length}, Oluşturulma: {fileInfo.CreationTime}, Son Değişiklik: {fileInfo.LastWriteTime}", userId);
+                await _logService.LogInfoAsync($"Dosya bilgileri - Boyut: {fileInfo.Length}, Oluşturulma: {fileInfo.CreationTime}, Son Değişiklik: {fileInfo.LastWriteTime}", userId);
 
-                    var file = new FileModel
-                    {
-                        Id = fileId,
-                        Name = originalFileName,
-                        Path = filePath,
-                        ContentType = GetContentType(extension),
-                        Size = fileInfo.Length,
-                        UserId = userId,
-                        UploadedAt = DateTime.UtcNow,
+                var file = new FileModel
+                {
+                    Id = fileId,
+                    Name = originalFileName,
+                    Path = filePath,
+                    ContentType = GetContentType(extension),
+                    Size = fileInfo.Length,
+                    UserId = userId,
+                    UploadedAt = DateTime.UtcNow,
                         LastModified = DateTime.UtcNow,
-                        FolderId = folderId
-                    };
+                    FolderId = folderId
+                };
 
-                    await _logService.LogInfoAsync($"Dosya modeli oluşturuldu. ID: {fileId}, Boyut: {fileInfo.Length}, Klasör ID: {folderId}", userId);
+                await _logService.LogInfoAsync($"Dosya modeli oluşturuldu. ID: {fileId}, Boyut: {fileInfo.Length}, Klasör ID: {folderId}", userId);
 
-                    try
+                try
+                {
+                    _context.Files.Add(file);
+                    await _context.SaveChangesAsync();
+                    await _logService.LogInfoAsync("Dosya veritabanına kaydedildi", userId);
+                }
+                catch (Exception ex)
+                {
+                    await _logService.LogErrorAsync($"Veritabanı kayıt hatası: {ex.Message}", ex, userId);
+                    // Dosyayı sil
+                    if (System.IO.File.Exists(filePath))
                     {
-                        _context.Files.Add(file);
-                        await _context.SaveChangesAsync();
-                        await _logService.LogInfoAsync("Dosya veritabanına kaydedildi", userId);
+                        System.IO.File.Delete(filePath);
                     }
-                    catch (Exception ex)
-                    {
-                        await _logService.LogErrorAsync($"Veritabanı kayıt hatası: {ex.Message}", ex, userId);
-                        // Dosyayı sil
-                        if (System.IO.File.Exists(filePath))
-                        {
-                            System.IO.File.Delete(filePath);
-                        }
-                        throw new DbUpdateException($"Veritabanı kayıt hatası: {ex.Message}", ex);
-                    }
+                    throw new DbUpdateException($"Veritabanı kayıt hatası: {ex.Message}", ex);
+                }
 
-                    // Clear the cache for this user's file list in the specific folder or root
-                    _cacheService.Remove($"user_files_and_folders_{userId}_{folderId ?? "root"}");
+                // Clear the cache for this user's file list in the specific folder or root
+                _cacheService.Remove($"user_files_and_folders_{userId}_{folderId ?? "root"}");
                     _cacheService.Remove($"user_files_{userId}");
-                    await _logService.LogInfoAsync("Dosya yükleme sonrası ilgili önbellekler temizlendi", userId);
+                await _logService.LogInfoAsync("Dosya yükleme sonrası ilgili önbellekler temizlendi", userId);
 
-                    return fileId;
+                return fileId;
                 }
             }
             catch (Exception ex)

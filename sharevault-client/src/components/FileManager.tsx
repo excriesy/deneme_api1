@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Upload, message, Modal, Form, Input, Space, Card, Typography, Progress, Image, Tooltip, Dropdown, Select, Badge } from 'antd';
-import { UploadOutlined, DownloadOutlined, ShareAltOutlined, DeleteOutlined, InboxOutlined, FileOutlined, IeOutlined, MoreOutlined, StopOutlined, TeamOutlined, HistoryOutlined } from '@ant-design/icons';
+import { UploadOutlined, DownloadOutlined, ShareAltOutlined, DeleteOutlined, InboxOutlined, FileOutlined, IeOutlined, MoreOutlined, StopOutlined, TeamOutlined, HistoryOutlined, UploadOutlined as UploadOutlinedIcon } from '@ant-design/icons';
 import type { UploadFile } from 'antd/es/upload/interface';
 import fileService, { FileDto as FileServiceDto, FileVersionDto } from '../services/fileService';
 import folderService from '../services/folderService';
@@ -70,6 +70,11 @@ const FileManager: React.FC = () => {
     const [selectedFileForVersions, setSelectedFileForVersions] = useState<ExtendedFileDto | null>(null);
     const [fileVersions, setFileVersions] = useState<FileVersionDto[]>([]);
     const [loadingVersions, setLoadingVersions] = useState(false);
+    const [newVersionModalVisible, setNewVersionModalVisible] = useState(false);
+    const [selectedFileForNewVersion, setSelectedFileForNewVersion] = useState<ExtendedFileDto | null>(null);
+    const [newVersionForm] = Form.useForm();
+
+    const [uploadForm] = Form.useForm();
 
     useEffect(() => {
         if (user) {
@@ -198,6 +203,17 @@ const FileManager: React.FC = () => {
         if (!selectedFile || !tempFileName) return;
 
         try {
+            // Önce aynı isimde dosya var mı kontrol et
+            const existingFile = files.find(f => f.name === selectedFile.name && !f.isFolder);
+            
+            if (existingFile) {
+                // Aynı isimde dosya varsa, not modalını göster
+                setSelectedFileForNewVersion(existingFile);
+                setNewVersionModalVisible(true);
+                return;
+            }
+
+            // Aynı isimde dosya yoksa normal yükleme yap
             setLoading(true);
             await fileService.completeUpload(tempFileName, selectedFile.name, currentFolderId);
             message.success('Dosya başarıyla yüklendi');
@@ -565,6 +581,15 @@ const FileManager: React.FC = () => {
                                 />
                             </Tooltip>
                             {record.userId === user?.id && record.contentType !== 'folder' && (
+                                <Tooltip title="Yeni Versiyon">
+                                    <Button
+                                        icon={<UploadOutlinedIcon />}
+                                        onClick={() => handleNewVersion(record)}
+                                        type="text"
+                                    />
+                                </Tooltip>
+                            )}
+                            {record.userId === user?.id && record.contentType !== 'folder' && (
                                 <Tooltip title="Paylaşım Detayları">
                                     <Button
                                         icon={<TeamOutlined />}
@@ -924,6 +949,34 @@ const FileManager: React.FC = () => {
         setShareModalVisible(true);
     };
 
+    const handleNewVersion = async (file: ExtendedFileDto) => {
+        // Önce modalı açalım
+        setSelectedFileForNewVersion(file);
+        setNewVersionModalVisible(true);
+    };
+
+    const handleNewVersionSubmit = async (values: { changeNotes: string }) => {
+        if (!selectedFileForNewVersion || !selectedFile || !tempFileName) return;
+
+        try {
+            setLoading(true);
+            await fileService.completeUpload(tempFileName, selectedFile.name, currentFolderId, values.changeNotes);
+            message.success('Yeni versiyon başarıyla oluşturuldu');
+            setNewVersionModalVisible(false);
+            newVersionForm.resetFields();
+            setSelectedFile(null);
+            setPreviewImage('');
+            setUploadProgress(0);
+            setTempFileName(null);
+            setSelectedFileForNewVersion(null);
+            await loadFiles();
+        } catch (error: any) {
+            message.error('Yeni versiyon oluşturulurken bir hata oluştu: ' + error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return (
         <div style={{ padding: '20px' }}>
             <Title level={2}>Dosya Yöneticisi</Title>
@@ -989,52 +1042,67 @@ const FileManager: React.FC = () => {
 
                 {selectedFile && (
                     <div style={{ marginTop: 16 }}>
-                        <Space key="upload-space" direction="vertical" style={{ width: '100%' }}>
-                            <div>
-                                <p>Yüklenen dosya: {selectedFile.name}</p>
-                                <p>Boyut: {formatFileSize(selectedFile.size)}</p>
-                                {previewImage && (
-                                    <div style={{ marginTop: 8 }}>
-                                        <Image
-                                            src={previewImage}
-                                            alt="Dosya önizleme"
-                                            style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'contain' }}
-                                            preview={false}
-                                        />
-                                    </div>
-                                )}
-                            </div>
-                            
-                            <Progress 
-                                percent={uploadProgress} 
-                                status={uploading ? "active" : "success"}
-                                format={(percent) => `${percent}%`}
-                            />
-                            
-                            {!uploading ? (
-                                <Space key="upload-buttons">
-                                    <Button
-                                        type="primary"
-                                        onClick={handleCompleteUpload}
-                                        loading={loading}
+                        <Form form={uploadForm} layout="vertical">
+                            <Space key="upload-space" direction="vertical" style={{ width: '100%' }}>
+                                <div>
+                                    <p>Yüklenen dosya: {selectedFile.name}</p>
+                                    <p>Boyut: {formatFileSize(selectedFile.size)}</p>
+                                    {previewImage && (
+                                        <div style={{ marginTop: 8 }}>
+                                            <Image
+                                                src={previewImage}
+                                                alt="Dosya önizleme"
+                                                style={{ maxWidth: '200px', maxHeight: '200px', objectFit: 'contain' }}
+                                                preview={false}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                <Progress 
+                                    percent={uploadProgress} 
+                                    status={uploading ? "active" : "success"}
+                                    format={(percent) => `${percent}%`}
+                                />
+
+                                {!uploading && selectedFileForNewVersion && (
+                                    <Form.Item
+                                        name="changeNotes"
+                                        label="Değişiklik Notları"
+                                        rules={[{ required: true, message: 'Lütfen değişiklik notlarını girin!' }]}
                                     >
-                                        Yükle
-                                    </Button>
+                                        <Input.TextArea 
+                                            placeholder="Bu versiyonda yapılan değişiklikleri açıklayın..."
+                                            rows={3}
+                                        />
+                                    </Form.Item>
+                                )}
+                                
+                                {!uploading ? (
+                                    <Space key="upload-buttons">
+                                        <Button
+                                            type="primary"
+                                            onClick={handleCompleteUpload}
+                                            loading={loading}
+                                        >
+                                            Yükle
+                                        </Button>
+                                        <Button
+                                            onClick={handleCancelUpload}
+                                        >
+                                            İptal
+                                        </Button>
+                                    </Space>
+                                ) : (
                                     <Button
                                         onClick={handleCancelUpload}
+                                        danger
                                     >
-                                        İptal
+                                        İptal Et
                                     </Button>
-                                </Space>
-                            ) : (
-                                <Button
-                                    onClick={handleCancelUpload}
-                                    danger
-                                >
-                                    İptal Et
-                                </Button>
-                            )}
-                        </Space>
+                                )}
+                            </Space>
+                        </Form>
                     </div>
                 )}
             </Card>
@@ -1436,6 +1504,38 @@ const FileManager: React.FC = () => {
                     ]}
                     pagination={false}
                 />
+            </Modal>
+
+            <Modal
+                title="Yeni Versiyon Oluştur"
+                open={newVersionModalVisible}
+                onCancel={() => {
+                    setNewVersionModalVisible(false);
+                    newVersionForm.resetFields();
+                }}
+                footer={null}
+            >
+                <Form form={newVersionForm} onFinish={handleNewVersionSubmit}>
+                    <Form.Item
+                        name="changeNotes"
+                        label="Değişiklik Notları"
+                    >
+                        <Input.TextArea />
+                    </Form.Item>
+                    <Form.Item>
+                        <Space>
+                            <Button type="primary" htmlType="submit" loading={loading}>
+                                Oluştur
+                            </Button>
+                            <Button onClick={() => {
+                                setNewVersionModalVisible(false);
+                                newVersionForm.resetFields();
+                            }}>
+                                İptal
+                            </Button>
+                        </Space>
+                    </Form.Item>
+                </Form>
             </Modal>
         </div>
     );

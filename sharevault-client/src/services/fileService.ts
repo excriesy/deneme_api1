@@ -107,7 +107,7 @@ const fileService = {
         return response.data as { tempFileName: string, originalName: string };
     },
 
-    async completeUpload(tempFileName: string, originalFileName: string, folderId?: string | null): Promise<any> {
+    async completeUpload(tempFileName: string, originalFileName: string, folderId?: string | null, changeNotes?: string): Promise<any> {
         const requestBody: any = {
             tempFileName,
             originalFileName,
@@ -115,6 +115,10 @@ const fileService = {
 
         if (folderId) {
             requestBody.folderId = folderId;
+        }
+
+        if (changeNotes) {
+            requestBody.changeNotes = changeNotes;
         }
 
         const response = await api.post('/file/complete-upload', requestBody);
@@ -184,6 +188,15 @@ const fileService = {
             responseType: 'blob'
         });
         return response.data as Blob;
+    },
+
+    async createFileVersion(fileId: string, changeNotes: string): Promise<void> {
+        try {
+            await api.post(`/file/${fileId}/versions`, { changeNotes });
+        } catch (error) {
+            console.error('Yeni versiyon oluşturulurken hata:', error);
+            throw error;
+        }
     },
 };
 
