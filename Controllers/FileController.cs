@@ -970,7 +970,15 @@ namespace ShareVault.API.Controllers
                     return NotFound("Belirtilen versiyon bulunamadı");
 
                 var fileBytes = await _fileService.DownloadFileAsync(fileId, userId);
-                return File(fileBytes, "application/octet-stream", $"{Path.GetFileNameWithoutExtension(file.Name)}_v{versionNumber}{Path.GetExtension(file.Name)}");
+                
+                // Dosya adını ve uzantısını ayır
+                var fileNameWithoutExt = Path.GetFileNameWithoutExtension(file.Name);
+                var fileExtension = Path.GetExtension(file.Name);
+                
+                // Versiyon numarasını dosya adına ekle
+                var newFileName = $"{fileNameWithoutExt}_v{versionNumber}{fileExtension}";
+                
+                return File(fileBytes, "application/octet-stream", newFileName);
             }
             catch (Exception ex)
             {
