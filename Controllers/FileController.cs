@@ -1002,6 +1002,10 @@ namespace ShareVault.API.Controllers
                     return NotFound("Dosya bulunamadı");
 
                 var version = await _versioningService.CreateFileVersionAsync(file, userId, request.ChangeNotes);
+                
+                // Döngüsel referansları engellemek için File nesnesini null yapıyoruz
+                version.File = null;
+                
                 return Ok(version);
             }
             catch (Exception ex)

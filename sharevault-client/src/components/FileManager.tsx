@@ -960,7 +960,11 @@ const FileManager: React.FC = () => {
 
         try {
             setLoading(true);
-            await fileService.completeUpload(tempFileName, selectedFile.name, currentFolderId, values.changeNotes);
+            // Önce dosyayı yükle
+            await fileService.completeUpload(tempFileName, selectedFile.name, currentFolderId);
+            // Sonra versiyon notunu ekle
+            await fileService.createFileVersion(selectedFileForNewVersion.id, values.changeNotes);
+            
             message.success('Yeni versiyon başarıyla oluşturuldu');
             setNewVersionModalVisible(false);
             newVersionForm.resetFields();
