@@ -198,6 +198,43 @@ const fileService = {
             throw error;
         }
     },
+
+    async startUpload(file: File): Promise<string> {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const response = await api.post<{ tempFileName: string }>('/file/start-upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                },
+            });
+            
+            return response.data.tempFileName;
+        } catch (error) {
+            console.error('Dosya yükleme başlatılırken hata:', error);
+            throw error;
+        }
+    },
+
+    async uploadFile(file: File, folderId?: string | null): Promise<void> {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            if (folderId) {
+                formData.append('folderId', folderId);
+            }
+            
+            await api.post('/file/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                }
+            });
+        } catch (error) {
+            console.error('Dosya yüklenirken hata:', error);
+            throw error;
+        }
+    },
 };
 
 export default fileService; 

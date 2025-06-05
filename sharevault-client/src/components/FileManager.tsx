@@ -581,11 +581,12 @@ const FileManager: React.FC = () => {
                                 />
                             </Tooltip>
                             {record.userId === user?.id && record.contentType !== 'folder' && (
-                                <Tooltip title="Yeni Versiyon">
+                                <Tooltip title="Yeni Versiyon Yükle">
                                     <Button
-                                        icon={<UploadOutlinedIcon />}
+                                        icon={<HistoryOutlined />}
                                         onClick={() => handleNewVersion(record)}
-                                        type="text"
+                                        type="primary"
+                                        size="small"
                                     />
                                 </Tooltip>
                             )}
@@ -950,20 +951,67 @@ const FileManager: React.FC = () => {
     };
 
     const handleNewVersion = async (file: ExtendedFileDto) => {
-        // Önce modalı açalım
-        setSelectedFileForNewVersion(file);
-        setNewVersionModalVisible(true);
+        try {
+            // Önce modalı açalım
+            setSelectedFileForNewVersion(file);
+            setNewVersionModalVisible(true);
+            
+            // Form'u sıfırlayalım
+            newVersionForm.resetFields();
+            
+            // Önceki seçili dosyayı temizleyelim
+            setSelectedFile(null);
+            setPreviewImage('');
+            setUploadProgress(0);
+            setTempFileName(null);
+        } catch (error: any) {
+            message.error('Yeni versiyon oluşturma işlemi başlatılırken bir hata oluştu: ' + error.message);
+        }
     };
 
     const handleNewVersionSubmit = async (values: { changeNotes: string }) => {
-        if (!selectedFileForNewVersion || !selectedFile || !tempFileName) return;
+        if (!selectedFileForNewVersion || !selectedFile) {
+            message.error('Lütfen bir dosya seçin');
+            return;
+        }
+
+        try {
+            // Dosya isimlerini karşılaştır
+            const originalFileName = selectedFileForNewVersion.name;
+            const newFileName = selectedFile.name;
+
+            if (originalFileName !== newFileName) {
+                // Farklı dosya ismi seçilmişse onay iste
+                Modal.confirm({
+                    title: 'Farklı Dosya İsmi',
+                    content: `Orijinal dosya: ${originalFileName}\nSeçilen dosya: ${newFileName}\n\nFarklı bir dosya ismi seçtiniz. Yeni versiyon olarak yüklemek istediğinizden emin misiniz?`,
+                    okText: 'Evet, Yükle',
+                    cancelText: 'İptal',
+                    onOk: async () => {
+                        await uploadNewVersion(values.changeNotes);
+                    }
+                });
+            } else {
+                // Aynı dosya ismi ise direkt yükle
+                await uploadNewVersion(values.changeNotes);
+            }
+        } catch (error: any) {
+            message.error('Yeni versiyon oluşturulurken bir hata oluştu: ' + error.message);
+        }
+    };
+
+    const uploadNewVersion = async (changeNotes: string) => {
+        if (!selectedFile || !selectedFileForNewVersion) {
+            message.error('Dosya bilgileri eksik');
+            return;
+        }
 
         try {
             setLoading(true);
             // Önce dosyayı yükle
-            await fileService.completeUpload(tempFileName, selectedFile.name, currentFolderId);
+            await fileService.uploadFile(selectedFile, currentFolderId);
             // Sonra versiyon notunu ekle
-            await fileService.createFileVersion(selectedFileForNewVersion.id, values.changeNotes);
+            await fileService.createFileVersion(selectedFileForNewVersion.id, changeNotes);
             
             message.success('Yeni versiyon başarıyla oluşturuldu');
             setNewVersionModalVisible(false);
@@ -971,7 +1019,6 @@ const FileManager: React.FC = () => {
             setSelectedFile(null);
             setPreviewImage('');
             setUploadProgress(0);
-            setTempFileName(null);
             setSelectedFileForNewVersion(null);
             await loadFiles();
         } catch (error: any) {
@@ -1511,30 +1558,92 @@ const FileManager: React.FC = () => {
             </Modal>
 
             <Modal
-                title="Yeni Versiyon Oluştur"
+                title={`${selectedFileForNewVersion?.name} - Yeni Versiyon Yükle`}
                 open={newVersionModalVisible}
                 onCancel={() => {
                     setNewVersionModalVisible(false);
                     newVersionForm.resetFields();
+                    setSelectedFile(null);
+                    setPreviewImage('');
+                    setUploadProgress(0);
                 }}
                 footer={null}
+                width={600}
             >
-                <Form form={newVersionForm} onFinish={handleNewVersionSubmit}>
+                <Form form={newVersionForm} onFinish={handleNewVersionSubmit} layout="vertical">
+                    <Form.Item
+                        label="Dosya Seçin"
+                        required
+                        tooltip="Yeni versiyon olarak yüklenecek dosyayı seçin"
+                    >
+                        <Upload
+                            beforeUpload={(file) => {
+                                setSelectedFile(file);
+                                return false;
+                            }}
+                            maxCount={1}
+                            onRemove={() => {
+                                setSelectedFile(null);
+                                setPreviewImage('');
+                            }}
+                        >
+                            <Button icon={<UploadOutlined />}>Dosya Seç</Button>
+                        </Upload>
+                    </Form.Item>
+
+                    {selectedFile && (
+                        <Form.Item
+                            label="Seçilen Dosya"
+                            tooltip="Yeni versiyon olarak yüklenecek dosya"
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <FileOutlined />
+                                <span>{selectedFile.name}</span>
+                                <span style={{ color: '#999' }}>
+                                    ({formatFileSize(selectedFile.size)})
+                                </span>
+                            </div>
+                        </Form.Item>
+                    )}
+
                     <Form.Item
                         name="changeNotes"
                         label="Değişiklik Notları"
+                        rules={[
+                            { required: true, message: 'Lütfen değişiklik notlarını girin!' },
+                            { min: 10, message: 'Değişiklik notları en az 10 karakter olmalıdır!' }
+                        ]}
+                        tooltip="Bu versiyonda yapılan değişiklikleri detaylı olarak açıklayın"
                     >
-                        <Input.TextArea />
+                        <Input.TextArea 
+                            placeholder="Bu versiyonda yapılan değişiklikleri detaylı olarak açıklayın..."
+                            rows={4}
+                        />
                     </Form.Item>
+
+                    {uploadProgress > 0 && (
+                        <Progress percent={uploadProgress} status="active" />
+                    )}
+
                     <Form.Item>
                         <Space>
-                            <Button type="primary" htmlType="submit" loading={loading}>
-                                Oluştur
+                            <Button 
+                                type="primary" 
+                                htmlType="submit" 
+                                loading={loading}
+                                disabled={!selectedFile}
+                            >
+                                Yeni Versiyon Oluştur
                             </Button>
-                            <Button onClick={() => {
-                                setNewVersionModalVisible(false);
-                                newVersionForm.resetFields();
-                            }}>
+                            <Button 
+                                onClick={() => {
+                                    setNewVersionModalVisible(false);
+                                    newVersionForm.resetFields();
+                                    setSelectedFile(null);
+                                    setPreviewImage('');
+                                    setUploadProgress(0);
+                                }}
+                            >
                                 İptal
                             </Button>
                         </Space>

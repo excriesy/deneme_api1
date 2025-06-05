@@ -29,6 +29,7 @@ namespace ShareVault.API.Controllers
         private readonly IVersioningService _versioningService;
         private readonly ILogger<FileController> _logger;
         private readonly string _tempUploadPath;
+        private readonly IConfiguration _configuration;
 
         public FileController(
             AppDbContext context, 
@@ -36,14 +37,17 @@ namespace ShareVault.API.Controllers
             IFileService fileService, 
             ILogService logService, 
             IVersioningService versioningService,
-            ILogger<FileController> logger)
+            ILogger<FileController> logger,
+            IConfiguration configuration)
         {
-            _context = context;
-            _environment = environment;
-            _fileService = fileService;
-            _logService = logService;
-            _versioningService = versioningService;
-            _logger = logger;
+            _context = context ?? throw new ArgumentNullException(nameof(context));
+            _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+            _fileService = fileService ?? throw new ArgumentNullException(nameof(fileService));
+            _logService = logService ?? throw new ArgumentNullException(nameof(logService));
+            _versioningService = versioningService ?? throw new ArgumentNullException(nameof(versioningService));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+            
             _tempUploadPath = Path.Combine(_environment.ContentRootPath, "TempUploads");
             
             if (!Directory.Exists(_tempUploadPath))
@@ -1021,6 +1025,106 @@ namespace ShareVault.API.Controllers
                 var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 await _logService.LogErrorAsync("Dosya versiyonu oluşturulurken hata oluştu", ex, userId);
                 return StatusCode(500, "Dosya versiyonu oluşturulurken bir hata oluştu");
+            }
+        }
+
+        [HttpPost("start-upload")]
+        public async Task<IActionResult> StartUpload(IFormFile file)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                if (file == null || file.Length == 0)
+                    return BadRequest("Dosya seçilmedi");
+
+                // Geçici dosya adı oluştur
+                var tempFileName = $"{Guid.NewGuid()}_{file.FileName}";
+                var tempUploadPath = _configuration["TempUploadPath"] ?? "TempUploads";
+                var tempFilePath = Path.Combine(tempUploadPath, tempFileName);
+
+                // Geçici klasör yoksa oluştur
+                if (!Directory.Exists(tempUploadPath))
+                    Directory.CreateDirectory(tempUploadPath);
+
+                // Dosyayı geçici konuma kaydet
+                using (var stream = new FileStream(tempFilePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(stream);
+                }
+
+                return Ok(new { tempFileName });
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya yükleme başlatılırken hata oluştu", ex, userId);
+                return StatusCode(500, "Dosya yükleme başlatılırken bir hata oluştu");
+            }
+        }
+
+        [HttpPost("upload")]
+        public async Task<IActionResult> UploadFile(IFormFile file, string? folderId = null)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userId))
+                    return Unauthorized();
+
+                if (file == null || file.Length == 0)
+                    return BadRequest("Dosya seçilmedi");
+
+                // Dosya adını al
+                var fileName = file.FileName;
+                var fileExtension = Path.GetExtension(fileName);
+                var uniqueFileName = $"{Guid.NewGuid()}{fileExtension}";
+
+                // Dosya yolunu oluştur
+                var uploadPath = Path.Combine(_environment.ContentRootPath, "Uploads");
+                if (!Directory.Exists(uploadPath))
+                    Directory.CreateDirectory(uploadPath);
+
+                var filePath = Path.Combine(uploadPath, uniqueFileName);
+
+                // Dosyayı kaydet
+                using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(stream);
+                }
+
+                // Veritabanına kaydet
+                var fileEntity = new Models.FileModel
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Name = fileName,
+                    Path = filePath,
+                    Size = file.Length,
+                    ContentType = file.ContentType,
+                    UploadedAt = DateTime.UtcNow,
+                    LastModified = DateTime.UtcNow,
+                    UserId = userId,
+                    FolderId = folderId
+                };
+
+                _context.Files.Add(fileEntity);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { 
+                    id = fileEntity.Id,
+                    name = fileEntity.Name,
+                    size = fileEntity.Size,
+                    contentType = fileEntity.ContentType,
+                    uploadedAt = fileEntity.UploadedAt
+                });
+            }
+            catch (Exception ex)
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                await _logService.LogErrorAsync("Dosya yüklenirken hata oluştu", ex, userId);
+                return StatusCode(500, "Dosya yüklenirken bir hata oluştu");
             }
         }
     }
